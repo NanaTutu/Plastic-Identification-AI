@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+ultralytics
+opencv-python-headless
+numpy<2.0
+python-multipart
+pillow
+torch==2.2.2
+torchvision==0.17.2
+pymysql
+cryptography
+prometheus-fastapi-instrumentator

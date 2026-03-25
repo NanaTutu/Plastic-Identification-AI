@@ -1,0 +1,10 @@
+# configs/train.yaml
+model: yolov8n.pt      # base YOLOv8n model
+epochs: 50             # can reduce for test runs
+imgsz: 640             # image size
+batch: 16
+optimizer: Adam
+lr0: 0.001
+patience: 10
+project: experiments
+name: plasticid_v1
