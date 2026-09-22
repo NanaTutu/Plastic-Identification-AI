@@ -59,15 +59,27 @@ AI-powered plastic waste classification using YOLOv8 to identify 6 types of plas
 
 ### Predict Plastic Type
 
+With API key (header-based):
 ```bash
-curl -X POST "http://localhost:8000/predict?job_id=123" \
+curl -X POST "http://localhost:8000/v1/predict" \
+  -H "X-API-KEY: pk_xxx" \
+  -F "image=@plastic.jpg"
+```
+
+Legacy endpoint (also requires API key):
+```bash
+curl -X POST "http://localhost:8000/predict" \
+  -H "X-API-KEY: pk_xxx" \
+  -F "job_id=123" \
   -F "file=@plastic.jpg"
 ```
 
-With API key:
+Create an API key (master key required):
 ```bash
-curl -X POST "http://localhost:8000/v1/predict?api_key=pk_xxx" \
-  -F "file=@plastic.jpg"
+curl -X POST "http://localhost:8000/v1/keys" \
+  -H "X-API-KEY: <master_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"owner": "my_app", "rate_limit": 100, "window_seconds": 3600}'
 ```
 
 ### Health Check
@@ -85,7 +97,8 @@ curl http://localhost:8000/
 | `MYSQL_USER` | Database user | `tutu` |
 | `MYSQL_PASSWORD` | Database password | - |
 | `MYSQL_DATABASE` | Database name | `plasticid_db` |
-| `API_KEY` | Backend API key | - |
+| `API_KEY` | Backend/master API key | - |
+| `PORTAL_API_KEY` | Playground demo key | - |
 | `DATA_PATH` | Training data path | `/app/data/images` |
 | `MODEL_PATH` | Model weights path | `/app/models/best.pt` |
 
@@ -126,11 +139,23 @@ php spark serve
 
 ## Security
 
-- API keys required for prediction endpoints
-- Rate limiting per API key
+- API keys are required via the `X-API-KEY` header (never in query strings)
+- API keys are stored as SHA-256 hashes in the database
+- Rate limiting per API key (enforced on both endpoints), and rate limiting for master-key management endpoints
 - File type validation (JPEG, PNG only)
 - 10MB max file size
 - Credentials stored in `.env` (never commit this file)
+
+## Database
+
+Tables are created automatically on FastAPI startup (`api_keys`, `prediction_logs`).
+The CodeIgniter migration creates the reporting tables (`images`, `predictions`) — run it once:
+
+```bash
+cd plasticid-backend && php spark migrate
+```
+
+`created_at` columns default to `CURRENT_TIMESTAMP`, which also powers rate limiting.
 
 ## Project Structure
 

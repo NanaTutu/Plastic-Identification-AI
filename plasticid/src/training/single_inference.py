@@ -1,23 +1,15 @@
 from ultralytics import YOLO
 from pathlib import Path
 
-# -------------------------
-# Paths
-# -------------------------
-MODEL_PATH = "/home/tutu/Developement/plasticid/experiments/plasticid_v1/weights/best.pt"
-IMAGE_PATH = "/home/tutu/Developement/plasticid/data/images/test/hdpe (16).png"   # change this
-OUTPUT_DIR = "/home/tutu/Developement/plasticid/inference_output"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+MODEL_PATH = str(PROJECT_ROOT / "experiments" / "plasticid_v1" / "weights" / "best.pt")
+IMAGE_PATH = str(PROJECT_ROOT / "data" / "images" / "test" / "hdpe (16).png")
+OUTPUT_DIR = str(PROJECT_ROOT / "inference_output")
 
 Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
-# -------------------------
-# Load model (CPU)
-# -------------------------
 model = YOLO(MODEL_PATH)
 
-# -------------------------
-# Run inference
-# -------------------------
 results = model.predict(
     source=IMAGE_PATH,
     device="cpu",
@@ -27,9 +19,6 @@ results = model.predict(
     name="run1"
 )
 
-# -------------------------
-# Print detections
-# -------------------------
 for r in results:
     if r.boxes is None:
         print("No objects detected.")
@@ -42,4 +31,4 @@ for r in results:
 
         print(f"Detected: {class_name} | Confidence: {conf:.2f}")
 
-print("✅ Inference complete")
+print("Inference complete")

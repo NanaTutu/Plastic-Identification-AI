@@ -14,3 +14,4 @@ class PredictionResponse(BaseModel):
     count: int
     detections: List[Detection]
     inference_ms: int
+    detected_object: str

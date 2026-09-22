@@ -10,9 +10,13 @@ class Predictions extends BaseController
 {
     public function store()
     {
-        // echo "API Predictions endpoint is active.";
-
-       log_message('error', '🔥 POST /api/predictions HIT');
+        $apiKey = $this->request->getHeaderLine('X-API-KEY');
+        $expectedKey = getenv('PLASTICID_API_KEY') ?: getenv('API_KEY');
+        if (!$expectedKey || $apiKey !== $expectedKey) {
+            return $this->response
+                ->setStatusCode(401)
+                ->setJSON(['error' => 'Unauthorized']);
+        }
 
         $payload = $this->request->getJSON(true);
 
@@ -24,35 +28,55 @@ class Predictions extends BaseController
 
         $imageModel = new ImageModel();
         $predictionModel = new PredictionModel();
+        $db = \Config\Database::connect();
 
-        // 1️⃣ Insert image / job
+        $db->transStart();
+
         $imageId = $imageModel->insert([
             'filename' => $payload['job_id'],
             'source'   => $payload['source'] ?? 'api'
         ]);
 
-        if (!$imageId) {
-            return $this->response
-                ->setStatusCode(500)
-                ->setJSON(['error' => 'Failed to insert image']);
-        }
-
-        // 2️⃣ Insert predictions
         $inserted = 0;
 
-        if (!empty($payload['detections']) && is_array($payload['detections'])) {
+        if ($imageId && !empty($payload['detections']) && is_array($payload['detections'])) {
             foreach ($payload['detections'] as $d) {
+                if (!isset($d['class'], $d['confidence'], $d['bbox']) || !is_array($d['bbox'])) {
+                    continue;
+                }
+                if (!is_string($d['class'])) {
+                    continue;
+                }
+                if (!is_numeric($d['confidence']) || $d['confidence'] < 0 || $d['confidence'] > 1) {
+                    continue;
+                }
+                $bbox = $d['bbox'];
+                if (!isset($bbox[0], $bbox[1], $bbox[2], $bbox[3])) {
+                    continue;
+                }
+                if (!is_numeric($bbox[0]) || !is_numeric($bbox[1]) || !is_numeric($bbox[2]) || !is_numeric($bbox[3])) {
+                    continue;
+                }
+
                 $predictionModel->insert([
                     'image_id'   => $imageId,
                     'label'      => $d['class'],
-                    'confidence' => $d['confidence'],
-                    'x1' => $d['bbox'][0],
-                    'y1' => $d['bbox'][1],
-                    'x2' => $d['bbox'][2],
-                    'y2' => $d['bbox'][3],
+                    'confidence' => (float) $d['confidence'],
+                    'x1'         => (float) $bbox[0],
+                    'y1'         => (float) $bbox[1],
+                    'x2'         => (float) $bbox[2],
+                    'y2'         => (float) $bbox[3],
                 ]);
                 $inserted++;
             }
+        }
+
+        $db->transComplete();
+
+        if ($db->transStatus() === false) {
+            return $this->response
+                ->setStatusCode(500)
+                ->setJSON(['error' => 'Failed to store predictions']);
         }
 
         return $this->response->setJSON([
@@ -60,71 +84,32 @@ class Predictions extends BaseController
             'image_id' => $imageId,
             'predictions_inserted' => $inserted
         ]);
-        // log_message('error', '🔥 /api/predictions HIT');
-
-        // $apiKey = $this->request->getHeaderLine('X-API-KEY');
-        // if ($apiKey !== getenv('PLASTICID_API_KEY')) {
-        //     return $this->response
-        //         ->setStatusCode(401)
-        //         ->setJSON(['error' => 'Unauthorized']);
-        // }
-
-        // $payload = $this->request->getJSON(true);
-
-        // if (!$payload || empty($payload['job_id'])) {
-        //     return $this->response
-        //         ->setStatusCode(400)
-        //         ->setJSON(['error' => 'Invalid payload']);
-        // }
-
-        // $imageModel = new ImageModel();
-        // $predictionModel = new PredictionModel();
-
-        // // Insert image/job
-        // $imageId = $imageModel->insert([
-        //     'filename' => $payload['job_id'],
-        //     'source'   => $payload['source'] ?? 'api'
-        // ]);
-
-        // if (!$imageId) {
-        //     return $this->response
-        //         ->setStatusCode(500)
-        //         ->setJSON(['error' => 'Image insert failed']);
-        // }
-
-        // // Insert predictions
-        // foreach ($payload['detections'] as $d) {
-        //     $predictionModel->insert([
-        //         'image_id'   => 100,
-        //         'label'      => 'testing',
-        //         'confidence' => 0.0444,
-        //         'x1' => 0.4,
-        //         'y1' => 0.4,
-        //         'x2' => 0.4,
-        //         'y2' => 0.4,
-        //     ]);
-        // }
-
-        // return $this->response->setJSON([
-        //     'status'   => 'stored',
-        //     'image_id'=> $imageId,
-        //     'count'   => count($payload['detections'])
-        // ]);
     }
 
     public function index()
     {
-        $client = \Config\Services::curlrequest();
-        $response = $client->get('http://plasticid-fastapi:8000/v1/list_keys');
-        $data = json_decode($response->getBody(), true);
-        return $this->response->setJSON($data);
-    }
+        $apiKey = $this->request->getHeaderLine('X-API-KEY');
+        $expectedKey = getenv('PLASTICID_API_KEY') ?: getenv('API_KEY');
+        if (!$expectedKey || $apiKey !== $expectedKey) {
+            return $this->response
+                ->setStatusCode(401)
+                ->setJSON(['error' => 'Unauthorized']);
+        }
 
-    public function keys()
-    {
+        $fastapiHost = env('FASTAPI_HOST', 'plasticid-fastapi');
+        $masterKey = getenv('PLASTICID_API_KEY') ?: getenv('API_KEY');
         $client = \Config\Services::curlrequest();
-        $response = $client->get('http://plasticid-fastapi:8000/v1/list_keys');
-        $data = json_decode($response->getBody(), true);
-        return view('dashboard/keys', ['keys' => $data['api_keys']]);
+
+        try {
+            $response = $client->get("http://{$fastapiHost}:8000/v1/list_keys", [
+                'headers' => ['X-API-KEY' => $masterKey],
+            ]);
+            $data = json_decode($response->getBody(), true);
+            return $this->response->setJSON($data);
+        } catch (\Exception $e) {
+            return $this->response
+                ->setStatusCode(502)
+                ->setJSON(['error' => 'Upstream service unavailable']);
+        }
     }
 }

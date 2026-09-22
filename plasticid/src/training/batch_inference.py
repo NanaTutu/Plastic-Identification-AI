@@ -2,24 +2,16 @@ from ultralytics import YOLO
 from pathlib import Path
 import csv
 
-# -------------------------
-# Paths
-# -------------------------
-MODEL_PATH = "/home/tutu/Developement/plasticid/experiments/plasticid_v1/weights/best.pt"
-IMAGE_DIR = "/home/tutu/Developement/plasticid/data/images/test"
-OUTPUT_DIR = "/home/tutu/Developement/plasticid/batch_inference_output"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+MODEL_PATH = str(PROJECT_ROOT / "experiments" / "plasticid_v1" / "weights" / "best.pt")
+IMAGE_DIR = str(PROJECT_ROOT / "data" / "images" / "test")
+OUTPUT_DIR = str(PROJECT_ROOT / "batch_inference_output")
 CSV_PATH = f"{OUTPUT_DIR}/results.csv"
 
 Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
-# -------------------------
-# Load model (CPU)
-# -------------------------
 model = YOLO(MODEL_PATH)
 
-# -------------------------
-# Run inference on folder
-# -------------------------
 results = model.predict(
     source=IMAGE_DIR,
     device="cpu",
@@ -29,9 +21,6 @@ results = model.predict(
     name="images"
 )
 
-# -------------------------
-# Write CSV
-# -------------------------
 with open(CSV_PATH, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow([
@@ -62,5 +51,5 @@ with open(CSV_PATH, "w", newline="") as f:
                 round(y2, 1),
             ])
 
-print(f"✅ Batch inference complete")
-print(f"📊 Results saved to: {CSV_PATH}")
+print(f"Batch inference complete")
+print(f"Results saved to: {CSV_PATH}")

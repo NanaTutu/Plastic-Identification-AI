@@ -22,14 +22,14 @@ class Database extends Config
     /**
      * The default database connection.
      *
-     * @var array<string, mixed>
+     * @var array<string, mixed
      */
     public array $default = [
         'DSN'          => '',
-        'hostname'     => 'plasticid-db',
-        'username'     => 'tutu',
-        'password'     => 'Nana00900113.',
-        'database'     => 'plasticid_db',
+        'hostname'     => '',
+        'username'     => '',
+        'password'     => '',
+        'database'     => '',
         'DBDriver'     => 'MySQLi',
         'DBPrefix'     => '',
         'pConnect'     => false,
@@ -50,6 +50,20 @@ class Database extends Config
             'time'     => 'H:i:s',
         ],
     ];
+
+    // public function __construct()
+    // {
+    //     parent::__construct();
+
+    //     $this->default['hostname'] = env('database.default.hostname', 'plasticid-db');
+    //     $this->default['username'] = env('database.default.username', 'tutu');
+    //     $this->default['password'] = env('database.default.password', '');
+    //     $this->default['database'] = env('database.default.database', 'plasticid_db');
+
+    //     if (ENVIRONMENT === 'testing') {
+    //         $this->defaultGroup = 'tests';
+    //     }
+    // }
 
     //    /**
     //     * Sample database connection for SQLite3.
@@ -194,9 +208,11 @@ class Database extends Config
     {
         parent::__construct();
 
-        // Ensure that we always set the database group to 'tests' if
-        // we are currently running an automated test suite, so that
-        // we don't overwrite live data on accident.
+        $this->default['hostname'] = env('database.default.hostname', 'plasticid-db');
+        $this->default['username'] = env('database.default.username', 'tutu');
+        $this->default['password'] = env('database.default.password', '');
+        $this->default['database'] = env('database.default.database', 'plasticid_db');
+
         if (ENVIRONMENT === 'testing') {
             $this->defaultGroup = 'tests';
         }

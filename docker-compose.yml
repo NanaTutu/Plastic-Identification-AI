@@ -2,21 +2,36 @@ services:
   fastapi:
     build: ./plasticid
     container_name: plasticid-fastapi
+    restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      PORTAL_API_KEY: ${PORTAL_API_KEY}
     volumes:
       - ./plasticid/data:/app/data
       - ./plasticid/models:/app/models
     depends_on:
       - ci
+      - redis
     networks:
       - plasticid-net
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=5)"
+      interval: 30s
+      timeout: 5s
+      retries: 8
+      start_period: 50s
 
   ci:
     build: ./plasticid-backend
     container_name: plasticid-backend
+    restart: unless-stopped
     ports:
       - "8080:80"
     env_file:
@@ -28,6 +43,10 @@ services:
       database.default.username: ${MYSQL_USER}
       database.default.password: ${MYSQL_PASSWORD}
       database.default.DBDriver: MySQLi
+      PLASTICID_API_KEY: ${API_KEY}
+      PLASTICID_PORTAL_API_KEY: ${PORTAL_API_KEY}
+    depends_on:
+      - plasticid-db
     networks:
       - plasticid-net
 
@@ -48,10 +67,33 @@ services:
       - "3306:3306"
     networks:
       - plasticid-net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: plasticid-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - plasticid-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   prometheus:
     image: prom/prometheus
     container_name: prometheus
+    restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
@@ -62,6 +104,7 @@ services:
   grafana:
     image: grafana/grafana
     container_name: grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:
@@ -74,3 +117,4 @@ networks:
 
 volumes:
   mysql_data:
+  redis_data:
