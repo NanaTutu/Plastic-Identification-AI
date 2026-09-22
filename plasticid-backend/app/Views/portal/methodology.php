@@ -44,7 +44,6 @@
 
         <p class="text-muted small mt-4 text-center">
             <code>/v1/predict</code> runs all three stages and returns class, confidence, and bounding box per detection.
-            <code>/predict</code> (legacy) skips detection and classifies the whole image.
         </p>
     </div>
 </section>

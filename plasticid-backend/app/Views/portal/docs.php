@@ -64,7 +64,6 @@ X-API-KEY: pk_your_key_here</pre>
                     </thead>
                     <tbody>
                         <tr><td><span class="badge-resin">POST</span></td><td><code>/v1/predict</code></td><td>API key</td><td>Detect &rarr; crop &rarr; classify</td></tr>
-                        <tr><td><span class="badge-resin">POST</span></td><td><code>/predict</code></td><td>API key</td><td>Legacy simple classification</td></tr>
                         <tr><td><span class="badge-resin">GET</span></td><td><code>/v1/predictions</code></td><td>API key</td><td>Recent prediction summary</td></tr>
                         <tr><td><span class="badge-resin">GET</span></td><td><code>/v1/usage</code></td><td>API key</td><td>Your limits &amp; usage</td></tr>
                         <tr><td><span class="badge-resin">POST</span></td><td><code>/v1/keys</code></td><td>Master</td><td>Create an API key</td></tr>
@@ -107,19 +106,6 @@ X-API-KEY: pk_your_key_here</pre>
 }</pre>
             </div>
             <p class="text-muted small mt-2">Headers <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> and <code>X-RateLimit-Reset</code> disclose your current quota.</p>
-        </div>
-
-        <div class="mb-5" id="legacy">
-            <div class="eyebrow grad mb-2">Legacy Endpoint</div>
-            <h3 class="fw-bold mb-1">POST /predict</h3>
-            <p class="lead-muted mb-3">Direct classification of the whole image. Fields: <code>job_id</code>, <code>file</code>, optional <code>source</code>.</p>
-            <div class="code-block">
-                <button class="code-copy" type="button">Copy</button>
-<pre>curl -X POST "http://localhost:8000/predict" \
-  -H "X-API-KEY: pk_your_key_here" \
-  -F "job_id=my-ref-123" \
-  -F "file=@plastic_bottle.jpg"</pre>
-            </div>
         </div>
 
         <div class="mb-5" id="manage">

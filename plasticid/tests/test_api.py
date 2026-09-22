@@ -81,7 +81,8 @@ def test_predict_success(api_client):
          mock.patch.object(main, "run_inference",
                            return_value=([], "unknown")), \
          mock.patch.object(main, "increment_usage"), \
-         mock.patch.object(main, "log_prediction"):
+         mock.patch.object(main, "log_prediction"), \
+         mock.patch.object(main, "send_to_ci") as send_mock:
         response = api_client.post(
             "/v1/predict",
             headers={"X-API-KEY": "pk_test"},
@@ -93,6 +94,7 @@ def test_predict_success(api_client):
     assert data["count"] == 0
     assert data["detections"] == []
     assert "X-RateLimit-Remaining" in response.headers
+    assert send_mock.call_count == 1
 
 
 def test_rate_limit_exceeded(api_client):
@@ -131,25 +133,6 @@ def test_image_content_validation(api_client):
         )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "INVALID_IMAGE"
-
-
-def test_legacy_predict_success(api_client):
-    with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
-         mock.patch.object(main, "check_rate_limit", return_value=0), \
-         mock.patch.object(main, "run_simple_inference", return_value=[]), \
-         mock.patch.object(main, "increment_usage"), \
-         mock.patch.object(main, "log_prediction"), \
-         mock.patch.object(main, "send_to_ci"):
-        response = api_client.post(
-            "/predict",
-            headers={"X-API-KEY": "pk_test"},
-            data={"job_id": "test123"},
-            files={"file": ("test.jpg", make_image(), "image/jpeg")},
-        )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "completed"
-    assert data["job_id"] == "test123"
 
 
 def test_master_key_required(api_client):

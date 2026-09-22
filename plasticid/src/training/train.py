@@ -1,6 +1,8 @@
 from ultralytics import YOLO
 import yaml
 import csv
+import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +24,23 @@ OPTIMIZER = cfg.get("optimizer", "Adam")
 LR0 = cfg.get("lr0", 0.001)
 PATIENCE = cfg.get("patience", 10)
 
+MODEL_OUTPUT = os.getenv("MODEL_PATH", str(MODELS_DIR / "best_v8m.pt"))
+
+
+def _expand_env(value: str) -> str:
+    def repl(match):
+        var = match.group(1)
+        default = match.group(3) or ""
+        return os.getenv(var, default)
+
+    pattern = re.compile(r"\$\{([^}:]+)(?::-(.*?))?\}")
+    return pattern.sub(repl, str(value))
+
+
+with open(DATA_YAML) as f:
+    data_cfg = yaml.safe_load(f)
+data_cfg["path"] = _expand_env(data_cfg.get("path", ""))
+
 run_name = f"{cfg.get('name', 'plasticid')}_{datetime.today().strftime('%Y%m%d_%H%M%S')}"
 
 EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,7 +59,7 @@ if not metrics_file.exists():
 model = YOLO(PRETRAINED_MODEL)
 
 model.train(
-    data=DATA_YAML,
+    data=data_cfg,
     epochs=EPOCHS,
     imgsz=IMGSZ,
     batch=BATCH,
@@ -78,8 +97,8 @@ with open(metrics_file, "a", newline="") as f:
 
 experiment_best = EXPERIMENTS_DIR / run_name / "weights" / "best.pt"
 if experiment_best.exists():
-    shutil.copy(experiment_best, MODELS_DIR / "best.pt")
-    print(f"Copied best model to {MODELS_DIR / 'best.pt'}")
+    shutil.copy(experiment_best, MODEL_OUTPUT)
+    print(f"Copied best model to {MODEL_OUTPUT}")
 
 print(f"Training completed successfully")
 print(f"Run: {run_name}")

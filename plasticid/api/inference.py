@@ -25,10 +25,12 @@ ONNX_INFERENCE = os.getenv("ONNX_INFERENCE", "0") == "1"
 logger = logging.getLogger("plasticid-api")
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
-MODEL_NAME = "best_v8m.pt"
-DETECTOR_NAME = "yolov8n.pt"
-TORCH_MODEL_PATH = MODELS_DIR / MODEL_NAME
-TORCH_DETECTOR_PATH = MODELS_DIR / DETECTOR_NAME
+MODEL_PATH = os.getenv("MODEL_PATH", str(MODELS_DIR / "best_v8m.pt"))
+DETECTOR_PATH = os.getenv("DETECTOR_PATH", str(MODELS_DIR / "yolov8n.pt"))
+MODEL_NAME = Path(MODEL_PATH).name
+DETECTOR_NAME = Path(DETECTOR_PATH).name
+TORCH_MODEL_PATH = Path(MODEL_PATH)
+TORCH_DETECTOR_PATH = Path(DETECTOR_PATH)
 
 TARGET_OBJECTS = [
     "bottle",
@@ -42,6 +44,11 @@ TARGET_OBJECTS = [
 classifier_model: YOLO | None = None
 detector_model: YOLO | None = None
 INFERENCE_MODE = "torch"
+MODEL_LOADED = False
+
+
+def is_model_loaded() -> bool:
+    return MODEL_LOADED
 
 
 def _export_onnx(pt_path: Path) -> Path:
@@ -79,8 +86,9 @@ def _predict(yolo: YOLO, source, conf: float):
 
 
 def warmup() -> str:
-    global INFERENCE_MODE, classifier_model, detector_model
+    global INFERENCE_MODE, classifier_model, detector_model, MODEL_LOADED
     if classifier_model is not None and detector_model is not None:
+        MODEL_LOADED = True
         return INFERENCE_MODE
 
     if ONNX_INFERENCE and ONNX_AVAILABLE:
@@ -98,6 +106,7 @@ def warmup() -> str:
     blank = Image.new("RGB", (64, 64))
     _predict(classifier_model, blank, 0.25)
     _predict(detector_model, blank, 0.25)
+    MODEL_LOADED = True
     logger.info(f"Inference engine ready (backend={INFERENCE_MODE})")
     return INFERENCE_MODE
 

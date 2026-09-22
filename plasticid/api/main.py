@@ -1,19 +1,19 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, Form, Header, Request, Body, Response, HTTPException
+from fastapi import FastAPI, File, UploadFile, Header, Request, Body, Response
 from fastapi.responses import JSONResponse
 from api.schema import PredictionResponse
 from api.database import (
     get_db, get_api_key_record, increment_usage, log_prediction,
     create_api_key_record, deactivate_api_key, list_api_keys,
-    get_prediction_logs, get_stats, init_db, get_or_create_portal_key,
+    get_prediction_logs, get_stats, init_db, get_or_create_portal_key, mask_key,
 )
 from api.auth import (
     check_rate_limit, check_admin_rate_limit, master_key_ok, api_error,
     record_prediction,
 )
 from api.inference import (
-    validate_file, validate_image_content, sanitize_job_id,
-    run_inference, run_simple_inference, MAX_FILE_SIZE, MODEL_NAME, warmup,
+    validate_file, validate_image_content,
+    run_inference, MAX_FILE_SIZE, MODEL_NAME, warmup, is_model_loaded,
 )
 from api.inference_cache import CACHE_ENABLED, result_cache
 import uuid
@@ -105,7 +105,7 @@ def _require_master(request: Request, x_api_key: str | None):
 def health_check():
     return {
         "status": "ok",
-        "model_loaded": True,
+        "model_loaded": is_model_loaded(),
         "service": "Plastic Identification API",
         "model": MODEL_NAME
     }
@@ -257,6 +257,23 @@ async def predict_v1(
     await asyncio.to_thread(log_prediction, key, job_id, "plasticid_v1", len(detections), inference_time)
     await asyncio.to_thread(record_prediction, key, key_record["window_seconds"])
 
+    ci_detections = [
+        {
+            "class": d["class_name"],
+            "confidence": d["confidence"],
+            "bbox": d["bbox"],
+        }
+        for d in detections
+    ]
+    asyncio.ensure_future(send_to_ci({
+        "job_id": job_id,
+        "model": "plasticid_v1",
+        "detections": ci_detections,
+        "count": len(detections),
+        "inference_ms": inference_time,
+        "source": "api",
+    }))
+
     return {
         "job_id": job_id,
         "model": "plasticid_v1",
@@ -289,7 +306,7 @@ def get_predictions(
     rows = get_prediction_logs(key, limit)
 
     return {
-        "api_key": key,
+        "api_key": mask_key(key),
         "results": rows
     }
 
@@ -310,85 +327,3 @@ async def send_to_ci(payload: dict):
             )
             if attempt < 2:
                 await asyncio.sleep(0.5 * (attempt + 1))
-
-
-@app.post("/predict")
-async def predict(
-    job_id: str = Form(...),
-    file: UploadFile = File(...),
-    source: str = Form(default="api"),
-    x_api_key: str | None = Header(default=None)
-):
-    key = x_api_key
-    if not key:
-        return api_error(401, "API_KEY_REQUIRED", "An API key must be provided")
-
-    key_record = await asyncio.to_thread(get_api_key_record, key)
-    if not key_record:
-        return api_error(401, "INVALID_API_KEY", "Invalid or inactive API key")
-
-    job_id = sanitize_job_id(job_id)
-
-    result = await asyncio.to_thread(
-        check_rate_limit, key, key_record["rate_limit"], key_record["window_seconds"]
-    )
-    if isinstance(result, JSONResponse):
-        return result
-
-    start_time = time.time()
-
-    try:
-        validate_file(file)
-
-        image_bytes = await file.read()
-        if len(image_bytes) > MAX_FILE_SIZE:
-            return api_error(413, "FILE_TOO_LARGE", f"File size exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-
-        if not validate_image_content(image_bytes):
-            return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid image")
-
-        cache_key = _cache_key("simple", image_bytes)
-        cached = result_cache.get(cache_key) if CACHE_ENABLED else None
-        if cached is None:
-            detections = await asyncio.to_thread(run_simple_inference, image_bytes)
-            result_cache.set(cache_key, detections)
-        else:
-            detections = cached
-
-        await asyncio.to_thread(increment_usage, key)
-
-        inference_ms = int((time.time() - start_time) * 1000)
-
-        await asyncio.to_thread(log_prediction, key, job_id, MODEL_NAME, len(detections), inference_ms)
-        await asyncio.to_thread(record_prediction, key, key_record["window_seconds"])
-
-        payload = {
-            "job_id": job_id,
-            "model": MODEL_NAME,
-            "detections": detections,
-            "count": len(detections),
-            "inference_ms": inference_ms,
-            "source": source
-        }
-
-        asyncio.ensure_future(send_to_ci(payload))
-
-        return {
-            "job_id": job_id,
-            "status": "completed",
-            "count": len(detections),
-            "inference_ms": inference_ms,
-            "detections": detections,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "job_id": job_id,
-                "status": "failed",
-                "error": str(e)
-            }
-        )

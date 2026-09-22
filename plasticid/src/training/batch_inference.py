@@ -1,9 +1,10 @@
 from ultralytics import YOLO
 from pathlib import Path
 import csv
+import os
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-MODEL_PATH = str(PROJECT_ROOT / "experiments" / "plasticid_v1" / "weights" / "best.pt")
+MODEL_PATH = os.getenv("MODEL_PATH", str(PROJECT_ROOT / "models" / "best_v8m.pt"))
 IMAGE_DIR = str(PROJECT_ROOT / "data" / "images" / "test")
 OUTPUT_DIR = str(PROJECT_ROOT / "batch_inference_output")
 CSV_PATH = f"{OUTPUT_DIR}/results.csv"

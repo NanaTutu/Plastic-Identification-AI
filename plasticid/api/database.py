@@ -198,7 +198,7 @@ def get_or_create_portal_key(portal_key: str):
                 return
             cur.execute("""
                 INSERT INTO api_keys (api_key, owner, rate_limit, window_seconds)
-                VALUES (%s, 'portal', 100, 60)
+                VALUES (%s, 'portal', 20, 60)
             """, (hash_key(portal_key),))
     finally:
         db.close()

@@ -66,14 +66,6 @@ curl -X POST "http://localhost:8000/v1/predict" \
   -F "image=@plastic.jpg"
 ```
 
-Legacy endpoint (also requires API key):
-```bash
-curl -X POST "http://localhost:8000/predict" \
-  -H "X-API-KEY: pk_xxx" \
-  -F "job_id=123" \
-  -F "file=@plastic.jpg"
-```
-
 Create an API key (master key required):
 ```bash
 curl -X POST "http://localhost:8000/v1/keys" \
@@ -99,8 +91,8 @@ curl http://localhost:8000/
 | `MYSQL_DATABASE` | Database name | `plasticid_db` |
 | `API_KEY` | Backend/master API key | - |
 | `PORTAL_API_KEY` | Playground demo key | - |
-| `DATA_PATH` | Training data path | `/app/data/images` |
-| `MODEL_PATH` | Model weights path | `/app/models/best.pt` |
+| `DATA_PATH` | Training data path (expanded by `train.py`) | `/app/data/images` |
+| `MODEL_PATH` | Classifier weights path (API loads it; `train.py` writes it) | `/app/models/best_v8m.pt` |
 
 ### Model Classes
 
@@ -141,7 +133,7 @@ php spark serve
 
 - API keys are required via the `X-API-KEY` header (never in query strings)
 - API keys are stored as SHA-256 hashes in the database
-- Rate limiting per API key (enforced on both endpoints), and rate limiting for master-key management endpoints
+- Rate limiting per API key (enforced on prediction endpoints), and rate limiting for master-key management endpoints
 - File type validation (JPEG, PNG only)
 - 10MB max file size
 - Credentials stored in `.env` (never commit this file)
