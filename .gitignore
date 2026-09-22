@@ -1,5 +1,6 @@
 # Environment
 .env
+plasticid-backend/.env
 
 # Python
 __pycache__/
@@ -10,6 +11,7 @@ __pycache__/
 venv/
 env/
 .venv
+notebookenv/
 
 # IDE
 .vscode/
@@ -24,11 +26,20 @@ Thumbs.db
 # Logs
 *.log
 
+# Jupyter
+.ipynb_checkpoints/
+
 # Models (large files)
 *.pt
 !yolov8n.pt
 
-# Data
-data/images/
+# Data (dataset images, labels, splits - kept out of the repo)
+data/
 inference_output/
 experiments/
+
+# Uploads
+uploads/
+
+# Inference output
+batch_inference_output/
