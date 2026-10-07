@@ -42,4 +42,33 @@ abstract class BaseController extends Controller
         // Preload any models, libraries, etc, here.
         // $this->session = service('session');
     }
+
+    protected function expectedMasterKey(): ?string
+    {
+        $key = getenv('PLASTICID_API_KEY') ?: getenv('API_KEY');
+
+        return is_string($key) && $key !== '' ? $key : null;
+    }
+
+    protected function isMasterRequest(): bool
+    {
+        $provided = $this->request->getHeaderLine('X-API-KEY');
+        $expected = $this->expectedMasterKey();
+
+        return $expected !== null && hash_equals($expected, $provided);
+    }
+
+    protected function fastApiBaseUrl(): string
+    {
+        $url = getenv('FASTAPI_BASE_URL') ?: 'http://plasticid-fastapi:8000';
+
+        return rtrim((string) $url, '/');
+    }
+
+    protected function fastApiHeaders(): array
+    {
+        $key = $this->expectedMasterKey();
+
+        return $key === null ? [] : ['X-API-KEY' => $key];
+    }
 }

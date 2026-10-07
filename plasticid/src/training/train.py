@@ -16,7 +16,12 @@ MODELS_DIR = BASE_DIR / "models"
 with open(CONFIG_YAML) as f:
     cfg = yaml.safe_load(f)
 
-PRETRAINED_MODEL = str(BASE_DIR / "models" / cfg["model"])
+model_source = BASE_DIR / "models" / cfg["model"]
+if not model_source.exists():
+    repository_model = BASE_DIR.parent / cfg["model"]
+    if repository_model.exists():
+        model_source = repository_model
+PRETRAINED_MODEL = str(model_source)
 EPOCHS = cfg["epochs"]
 IMGSZ = cfg["imgsz"]
 BATCH = cfg["batch"]
@@ -97,8 +102,10 @@ with open(metrics_file, "a", newline="") as f:
 
 experiment_best = EXPERIMENTS_DIR / run_name / "weights" / "best.pt"
 if experiment_best.exists():
-    shutil.copy(experiment_best, MODEL_OUTPUT)
-    print(f"Copied best model to {MODEL_OUTPUT}")
+    output_path = Path(MODEL_OUTPUT)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(experiment_best, output_path)
+    print(f"Copied best model to {output_path}")
 
 print(f"Training completed successfully")
 print(f"Run: {run_name}")

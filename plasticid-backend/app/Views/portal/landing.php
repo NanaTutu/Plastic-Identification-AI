@@ -2,167 +2,142 @@
 <body>
 <?= view('portal/_nav', ['active' => 'home']) ?>
 
-<header class="hero text-center py-5">
+<header class="hero">
     <div class="container">
-        <div class="pt-4">
-            <span class="hero-badge">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 3v12M5 8l3 4 4-6 4 8 3-6"/>
-                </svg>
-                Computer Vision Deep Learning
-            </span>
+        <div class="hero-copy">
+            <span class="kicker">YOLOv8 two-stage pipeline</span>
+            <h1>Identify plastic types<br>from a <span class="grad-text">single photo</span></h1>
+            <p class="lede">PlasticID classifies <strong>HDPE, LDPE, PVC, PET, PP and PS</strong> waste with object detection followed by resin-level classification.</p>
+            <div class="hero-actions">
+                <a class="btn btn-primary" href="/portal/playground">
+                    Try the playground
+                    <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </a>
+                <a class="btn btn-secondary" href="/portal/methodology">Read the methodology</a>
+            </div>
+            <div class="hero-meta">
+                <div class="meta"><strong>6</strong><span>resin classes</span></div>
+                <div class="meta"><strong>2</strong><span>model stages</span></div>
+                <div class="meta"><strong>10 MB</strong><span>max image upload</span></div>
+            </div>
         </div>
-        <h1 class="hero-title mt-3 mb-3">Identify plastic types<br><span class="gradient-text">instantly from a photo</span></h1>
-        <p class="hero-sub mx-auto mb-4">PlasticID classifies <strong>HDPE, LDPE, PVC, PET, PP &amp; PS</strong> waste with a YOLOv8 two-stage pipeline &mdash; object detection, then resin-level classification.</p>
-        <div class="d-flex flex-wrap justify-content-center gap-3 mb-4">
-            <a class="btn-grad" href="/portal/playground">
-                Try the Playground
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-            </a>
-            <a class="btn-ghost" href="/portal/methodology">Read the Methodology</a>
-        </div>
-        <div class="hero-chips pb-4">
-            <span class="chip"><span class="dot"></span>6 Resin Classes</span>
-            <span class="chip"><span class="dot"></span>2-Stage Pipeline</span>
-            <span class="chip"><span class="dot"></span>&le; 10 MB Images</span>
-            <span class="chip"><span class="dot"></span>Confidence Scoring</span>
+
+        <div class="hero-media" data-reveal>
+            <div class="media-frame">
+                <img class="photo" src="/assets/img/plastic-hero.jpg" alt="High-density polyethylene bottle photographed for the PlasticID dataset" width="640" height="480">
+                <span class="conf-chip">
+                    <span class="cv">HDPE</span>
+                    <span>80.7% confidence</span>
+                </span>
+            </div>
+            <div class="media-caption">
+                <span>Sample image from the test set</span>
+                <code>640 &times; 640 px in</code>
+            </div>
         </div>
     </div>
 </header>
 
-<section class="section">
+<section class="section" data-reveal>
     <div class="container">
-        <div class="text-center mb-5">
-            <div class="eyebrow grad mb-2">How It Works</div>
-            <h2 class="section-title">Three fast steps to a classification</h2>
-            <p class="section-lead">A purpose-built pipeline turns a raw photo into structured, actionable data.</p>
+        <div class="section-head">
+            <span class="kicker">How it works</span>
+            <h2 class="title-lg">Three steps from photo to structured data</h2>
+            <p class="lede">A purpose-built pipeline turns a raw photo into actionable, machine-readable output.</p>
         </div>
-        <div class="row g-4">
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body">
-                        <div class="icon-tile">
-                            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.4-3.4a2 2 0 0 0-2.8 0L6 20"/></svg>
-                        </div>
-                        <h5 class="fw-bold mb-2">1 · Upload an image</h5>
-                        <p class="text-muted mb-0">Send a JPEG or PNG (up to 10 MB) via the API, playground, or curl.</p>
-                    </div>
+
+        <ol class="steps" style="margin-top:40px">
+            <li>
+                <span class="step-tick">01</span>
+                <div>
+                    <h3>Upload an image</h3>
+                    <p>Send a JPEG or PNG (up to 10 MB) through the API, the playground, or a single curl command.</p>
+                </div>
+            </li>
+            <li>
+                <span class="step-tick">02</span>
+                <div>
+                    <h3>Detect, then classify</h3>
+                    <p>A YOLOv8 model locates the object and draws a bounding box. The crop is passed to a fine-tuned model that identifies the resin.</p>
+                </div>
+            </li>
+            <li>
+                <span class="step-tick">03</span>
+                <div>
+                    <h3>Read the structured result</h3>
+                    <p>The response carries the plastic type, a confidence score, the bounding box, and inference timing in a predictable JSON schema.</p>
+                </div>
+            </li>
+        </ol>
+    </div>
+</section>
+
+<section class="section band" data-reveal>
+    <div class="container">
+        <div class="section-head">
+            <span class="kicker">Resin classes</span>
+            <h2 class="title-lg">Six common plastics, one classifier</h2>
+            <p class="lede">Every class maps to a standard resin identification code: the categories that matter most for recycling and waste sorting.</p>
+        </div>
+        <?= view('portal/_plastics') ?>
+    </div>
+</section>
+
+<section class="section" data-reveal>
+    <div class="container">
+        <div class="section-head">
+            <span class="kicker">Explore</span>
+            <h2 class="title-lg">Everything you need to get started</h2>
+        </div>
+
+        <div class="bento" style="margin-top:36px">
+            <div class="bento-card play">
+                <div class="bento-media">
+                    <span class="tag tag-accent">Live demo</span>
+                    <img src="/assets/img/plastic-bento.jpg" alt="Plastic sample photographed for the PlasticID dataset" width="640" height="480">
+                </div>
+                <div class="bento-body">
+                    <h3>Test the classifier live</h3>
+                    <p class="lede">Upload a photo of plastic waste and see a real prediction. No API key required.</p>
+                    <a class="btn btn-primary" href="/portal/playground">
+                        Try the playground
+                        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                    </a>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body">
-                        <div class="icon-tile">
-                            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H4M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>
-                        </div>
-                        <h5 class="fw-bold mb-2">2 · Detect &amp; classify</h5>
-                        <p class="text-muted mb-0">A YOLOv8 model locates the object, crops it, then a fine-tuned model identifies the resin.</p>
-                    </div>
-                </div>
+            <div class="bento-card method">
+                <span class="kicker">Methodology</span>
+                <h3>Under the hood</h3>
+                <p class="lede">The two-stage pipeline, model training, dataset split, thresholds, and known limitations.</p>
+                <a class="btn btn-ghost" href="/portal/methodology">
+                    Read the methodology
+                    <svg class="arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </a>
             </div>
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body">
-                        <div class="icon-tile">
-                            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m15 18 2 2 4-4"/></svg>
-                        </div>
-                        <h5 class="fw-bold mb-2">3 · Get structured results</h5>
-                        <p class="text-muted mb-0">JSON with the plastic type, confidence score, bounding box, and timing.</p>
-                    </div>
-                </div>
+            <div class="bento-card docs">
+                <span class="kicker">API docs</span>
+                <h3>Every endpoint</h3>
+                <p class="lede">Authentication, request and response examples, error codes, and rate limits.</p>
+                <a class="btn btn-ghost" href="/portal/docs">
+                    Read the API docs
+                    <svg class="arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </a>
             </div>
         </div>
     </div>
 </section>
 
-<section class="section section-alt">
+<section class="promo" data-reveal>
     <div class="container">
-        <div class="text-center mb-5">
-            <div class="eyebrow grad mb-2">Explore</div>
-            <h2 class="section-title">Everything you need to get started</h2>
-        </div>
-        <div class="row g-4">
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body d-flex flex-column">
-                        <span class="step-num mb-3">01</span>
-                        <h5 class="fw-bold">Methodology</h5>
-                        <p class="text-muted flex-grow-1">Dive into the two-stage pipeline, model training, dataset, confidence thresholds, and known limitations.</p>
-                        <a class="btn-outline-dark w-100 justify-content-center" href="/portal/methodology">
-                            Read More
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                        </a>
-                    </div>
-                </div>
+        <div class="inner">
+            <div>
+                <span class="kicker">Get started</span>
+                <h2>Ready to classify plastic waste?</h2>
+                <p>Try it with your own image in seconds, or grab a dedicated key and start building.</p>
             </div>
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body d-flex flex-column">
-                        <span class="step-num mb-3">02</span>
-                        <h5 class="fw-bold">API Docs</h5>
-                        <p class="text-muted flex-grow-1">Every endpoint, authentication flow, request/response examples, error codes, and rate-limit rules.</p>
-                        <a class="btn-outline-dark w-100 justify-content-center" href="/portal/docs">
-                            View Docs
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                        </a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card-modern">
-                    <div class="card-body d-flex flex-column">
-                        <span class="step-num mb-3">03</span>
-                        <h5 class="fw-bold">Playground</h5>
-                        <p class="text-muted flex-grow-1">Upload a photo of plastic waste right now and see live predictions &mdash; no API key required.</p>
-                        <a class="btn-grad w-100 justify-content-center" href="/portal/playground">
-                            Try It Now
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="section">
-    <div class="container">
-        <div class="row g-5 align-items-center">
-            <div class="col-lg-5">
-                <div class="eyebrow grad mb-2">Resin Classes</div>
-                <h2 class="section-title">Six common plastics, one fast classifier</h2>
-                <p class="lead-muted">Each class corresponds to a standard resin identification code &mdash; the categories that matter most for recycling and waste sorting.</p>
-                <a class="btn-grad-dark" href="/portal/playground">Test With Your Own Photo</a>
-            </div>
-            <div class="col-lg-7">
-                <div class="table-responsive">
-                    <table class="table-modern">
-                        <thead>
-                            <tr><th>ID</th><th>Type</th><th>Common Uses</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td class="text-muted fw-semibold">0</td><td><span class="badge-resin">HDPE</span></td><td>Milk jugs, shampoo and detergent bottles</td></tr>
-                            <tr><td class="text-muted fw-semibold">1</td><td><span class="badge-resin">LDPE</span></td><td>Plastic bags, film, squeeze bottles</td></tr>
-                            <tr><td class="text-muted fw-semibold">2</td><td><span class="badge-resin">PVC</span></td><td>Pipes, flooring, window frames</td></tr>
-                            <tr><td class="text-muted fw-semibold">3</td><td><span class="badge-resin">PET</span></td><td>Drink bottles, food trays, fiber</td></tr>
-                            <tr><td class="text-muted fw-semibold">4</td><td><span class="badge-resin">PP</span></td><td>Caps, lids, containers, straws</td></tr>
-                            <tr><td class="text-muted fw-semibold">5</td><td><span class="badge-resin">PS</span></td><td>Cutlery, cups, foam packaging</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="pb-5">
-    <div class="container">
-        <div class="cta-band py-5">
-            <h2 class="fw-bold mb-2">Ready to classify plastic waste?</h2>
-            <p class="mb-4" style="color:#b6c2da">Try it with your own image in seconds, or grab an API key and start building.</p>
-            <div class="d-flex flex-wrap justify-content-center gap-3">
-                <a class="btn-grad" href="/portal/playground">Open Playground</a>
-                <a class="btn-ghost" href="/portal/request">Get an API Key</a>
+            <div class="actions">
+                <a class="btn btn-primary" href="/portal/playground">Try the playground</a>
+                <a class="btn btn-secondary" href="/portal/request">Get an API key</a>
             </div>
         </div>
     </div>

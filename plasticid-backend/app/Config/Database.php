@@ -35,11 +35,45 @@ class Database extends Config
         'pConnect'     => false,
         'DBDebug'      => true,
         'charset'      => 'utf8mb4',
-        'DBCollat'     => 'utf8mb4_general_ci',
+        'DBCollation'  => 'utf8mb4_0900_ai_ci',
         'swapPre'      => '',
         'encrypt'      => false,
         'compress'     => false,
-        'strictOn'     => false,
+        'strictOn'     => true,
+        'failover'     => [],
+        'port'         => 3306,
+        'numberNative' => false,
+        'foundRows'    => false,
+        'dateFormat'   => [
+            'date'     => 'Y-m-d',
+            'datetime' => 'Y-m-d H:i:s',
+            'time'     => 'H:i:s',
+        ],
+    ];
+
+    /**
+     * Connection used *only* by `php spark migrate` (see Config\Services::
+     * migrations). Holds DDL privileges; the runtime `default` group never
+     * receives these credentials.
+     *
+     * @var array<string, mixed>
+     */
+    public array $migrations = [
+        'DSN'          => '',
+        'hostname'     => '',
+        'username'     => '',
+        'password'     => '',
+        'database'     => '',
+        'DBDriver'     => 'MySQLi',
+        'DBPrefix'     => '',
+        'pConnect'     => false,
+        'DBDebug'      => true,
+        'charset'      => 'utf8mb4',
+        'DBCollation'  => 'utf8mb4_0900_ai_ci',
+        'swapPre'      => '',
+        'encrypt'      => false,
+        'compress'     => false,
+        'strictOn'     => true,
         'failover'     => [],
         'port'         => 3306,
         'numberNative' => false,
@@ -187,7 +221,7 @@ class Database extends Config
         'pConnect'    => false,
         'DBDebug'     => true,
         'charset'     => 'utf8',
-        'DBCollat'    => '',
+        'DBCollation' => '',
         'swapPre'     => '',
         'encrypt'     => false,
         'compress'    => false,
@@ -208,10 +242,22 @@ class Database extends Config
     {
         parent::__construct();
 
-        $this->default['hostname'] = env('database.default.hostname', 'plasticid-db');
-        $this->default['username'] = env('database.default.username', 'tutu');
-        $this->default['password'] = env('database.default.password', '');
-        $this->default['database'] = env('database.default.database', 'plasticid_db');
+        $this->default['hostname'] = getenv('DB_HOST') ?: env('database.default.hostname', 'plasticid-db');
+        $this->default['username'] = getenv('DB_USER') ?: env('database.default.username', 'plasticid_ci');
+        $this->default['password'] = getenv('DB_PASSWORD') ?: env('database.default.password', '');
+        $this->default['database'] = getenv('DB_NAME') ?: env('database.default.database', 'plasticid_db');
+        $this->default['port'] = (int) (getenv('DB_PORT') ?: env('database.default.port', 3306));
+        $this->default['DBDebug'] = filter_var(
+            getenv('DB_DEBUG') ?: env('database.default.DBDebug', false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+
+        // Migration-only credentials (consumed by Config\Services::migrations).
+        $this->migrations['hostname'] = getenv('DB_HOST') ?: env('database.migrations.hostname', 'plasticid-db');
+        $this->migrations['username'] = getenv('MIGRATE_DB_USER') ?: env('database.migrations.username', 'plasticid_migrate');
+        $this->migrations['password'] = getenv('MIGRATE_DB_PASSWORD') ?: env('database.migrations.password', '');
+        $this->migrations['database'] = getenv('DB_NAME') ?: env('database.migrations.database', 'plasticid_db');
+        $this->migrations['port'] = (int) (getenv('DB_PORT') ?: env('database.migrations.port', 3306));
 
         if (ENVIRONMENT === 'testing') {
             $this->defaultGroup = 'tests';

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+vendor
+writable/cache/*
+writable/logs/*
+writable/session/*
+writable/uploads/*
+writable/debugbar/*
+build
+phpunit.xml
+*.log
+# tests/ and phpunit.xml.dist stay in the image so the one-off test build
+# (`docker build --build-arg COMPOSER_FLAGS=`) can run phpunit; phpunit itself
+# is only installed when dev dependencies are requested.

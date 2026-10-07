@@ -104,4 +104,16 @@ class Cookie extends BaseConfig
      * @see https://tools.ietf.org/html/rfc2616#section-2.2
      */
     public bool $raw = false;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        $secure = getenv('COOKIE_SECURE');
+        if ($secure === false || $secure === '') {
+            $secure = getenv('FORCE_HTTPS') ?: '0';
+        }
+        $this->secure = filter_var($secure, FILTER_VALIDATE_BOOLEAN);
+        $this->samesite = getenv('COOKIE_SAMESITE') ?: 'Lax';
+    }
 }

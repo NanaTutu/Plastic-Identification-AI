@@ -4,17 +4,22 @@ import os
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-MAX_IMAGE_EDGE = int(os.getenv("MAX_IMAGE_EDGE", "1280"))
+MAX_IMAGE_EDGE = max(64, int(os.getenv("MAX_IMAGE_EDGE", "1280")))
+MAX_IMAGE_PIXELS = max(1_000_000, int(os.getenv("MAX_IMAGE_PIXELS", "40000000")))
 NORMALIZE_WB = os.getenv("NORMALIZE_WB", "1") == "1"
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
 def open_image(img_bytes: bytes) -> Image.Image:
     try:
-        img = Image.open(io.BytesIO(img_bytes))
-        img = img.convert("RGB")
-        img = ImageOps.exif_transpose(img)
-        return img
-    except (UnidentifiedImageError, OSError, ValueError) as e:
+        with Image.open(io.BytesIO(img_bytes)) as source:
+            if source.format not in {"JPEG", "PNG"}:
+                raise ValueError(f"Unsupported image format: {source.format or 'unknown'}")
+            if source.width * source.height > MAX_IMAGE_PIXELS:
+                raise ValueError("Image dimensions exceed the configured limit")
+            img = source.convert("RGB")
+        return ImageOps.exif_transpose(img)
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as e:
         raise ValueError(f"Invalid image: {e}") from e
 
 

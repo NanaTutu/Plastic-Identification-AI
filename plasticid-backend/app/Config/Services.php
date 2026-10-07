@@ -3,30 +3,30 @@
 namespace Config;
 
 use CodeIgniter\Config\BaseService;
+use CodeIgniter\Database\ConnectionInterface;
+use CodeIgniter\Database\MigrationRunner;
 
 /**
  * Services Configuration file.
  *
- * Services are simply other classes/libraries that the system uses
- * to do its job. This is used by CodeIgniter to allow the core of the
- * framework to be swapped out easily without affecting the usage within
- * the rest of your application.
- *
- * This file holds any application-specific services, or service overrides
- * that you might need. An example has been included with the general
- * method format you should use for your service methods. For more examples,
- * see the core Services file at system/Config/Services.php.
+ * Service overrides for the application. The only override is `migrations`:
+ * it runs `php spark migrate` with the dedicated `migrations` DB group
+ * (plasticid_migrate, DDL privileges) instead of the runtime default group
+ * (plasticid_ci, least-privilege). The migration bookkeeping table and every
+ * schema change are therefore created as the migrate user, and the web
+ * runtime never needs DDL rights.
  */
 class Services extends BaseService
 {
-    /*
-     * public static function example($getShared = true)
-     * {
-     *     if ($getShared) {
-     *         return static::getSharedInstance('example');
-     *     }
-     *
-     *     return new \CodeIgniter\Example();
-     * }
-     */
+    public static function migrations(?Migrations $config = null, ?ConnectionInterface $db = null, bool $getShared = true)
+    {
+        if ($getShared) {
+            return static::getSharedInstance('migrations', $config, $db);
+        }
+
+        $config ??= config(Migrations::class);
+        $db ??= db_connect(ENVIRONMENT === 'testing' ? 'tests' : 'migrations');
+
+        return new MigrationRunner($config, $db);
+    }
 }

@@ -199,4 +199,22 @@ class App extends BaseConfig
      * @see http://www.w3.org/TR/CSP/
      */
     public bool $CSPEnabled = false;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        $baseURL = getenv('APP_BASE_URL') ?: env('app.baseURL', 'http://localhost:8080/');
+        $this->baseURL = rtrim((string) $baseURL, '/') . '/';
+
+        $allowedHostnames = getenv('APP_ALLOWED_HOSTNAMES') ?: env('app.allowedHostnames', '');
+        if (is_string($allowedHostnames) && trim($allowedHostnames) !== '') {
+            $this->allowedHostnames = array_values(array_filter(array_map('trim', explode(',', $allowedHostnames))));
+        }
+
+        $this->forceGlobalSecureRequests = filter_var(
+            getenv('FORCE_HTTPS') ?: env('app.forceGlobalSecureRequests', false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
 }

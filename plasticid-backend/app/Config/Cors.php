@@ -28,9 +28,19 @@ class Cors extends BaseConfig
         'allowedOrigins' => ['http://localhost:8080'],
         'allowedOriginsPatterns' => [],
         'supportsCredentials' => false,
-        'allowedHeaders' => ['Content-Type', 'X-API-KEY', 'Authorization'],
+        'allowedHeaders' => ['Content-Type', 'X-API-KEY', 'X-CSRF-TOKEN', 'Authorization'],
         'exposedHeaders' => [],
-        'allowedMethods' => ['GET', 'POST', 'OPTIONS'],
+        'allowedMethods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         'maxAge' => 7200,
     ];
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        $origins = getenv('CORS_ALLOWED_ORIGINS') ?: env('cors.allowedOrigins', 'http://localhost:8080');
+        if (is_string($origins)) {
+            $this->default['allowedOrigins'] = array_values(array_filter(array_map('trim', explode(',', $origins))));
+        }
+    }
 }

@@ -1,15 +1,26 @@
 <footer class="site-footer">
-    <div class="container d-flex flex-wrap align-items-center justify-content-between gap-3">
-        <span class="text-muted small mb-0">♻ PlasticID &mdash; AI-Powered Plastic Classification</span>
-        <div class="footer-links small">
-            <a href="/portal/methodology">Methodology</a>
-            <a href="/portal/docs">API Docs</a>
-            <a href="/portal/playground">Playground</a>
-            <a href="/portal/request">Get API Key</a>
+    <div class="container">
+        <div class="inner">
+            <div>
+                <span class="fbrand">
+                    <span class="fmark">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/>
+                        </svg>
+                    </span>
+                    PlasticID
+                </span>
+                <p>AI-powered plastic classification for recycling and waste sorting.</p>
+            </div>
+            <nav class="footer-links" aria-label="Footer">
+                <a href="/portal/methodology">Methodology</a>
+                <a href="/portal/docs">API Docs</a>
+                <a href="/portal/playground">Playground</a>
+                <a href="/portal/request">Get API key</a>
+            </nav>
         </div>
     </div>
 </footer>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         var toggle = document.querySelector('.nav-toggle');
@@ -21,11 +32,18 @@
             });
         }
 
-        document.querySelectorAll('.code-copy').forEach(function (btn) {
-            var block = btn.closest('.code-block');
-            if (!block) return;
+        var scroller = document.querySelector('.site-nav');
+        if (scroller) {
+            var onScroll = function () { scroller.classList.toggle('scrolled', window.scrollY > 8); };
+            window.addEventListener('scroll', onScroll, { passive: true });
+            onScroll();
+        }
+
+        document.querySelectorAll('.code-block .code-copy, .key-box .code-copy').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                var code = block.querySelector('pre');
+                var root = btn.closest('.code-block') || btn.closest('.key-box');
+                if (!root) return;
+                var code = root.querySelector('pre, .key-value');
                 var text = code ? code.innerText : '';
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(text).then(function () {
@@ -36,5 +54,21 @@
                 }
             });
         });
+
+        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var items = document.querySelectorAll('[data-reveal]');
+        if (reduceMotion || !('IntersectionObserver' in window)) {
+            items.forEach(function (el) { el.classList.add('is-visible'); });
+        } else {
+            var io = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible');
+                        io.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+            items.forEach(function (el) { io.observe(el); });
+        }
     });
 </script>

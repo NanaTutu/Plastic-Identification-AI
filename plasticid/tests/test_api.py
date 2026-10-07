@@ -14,6 +14,11 @@ os.environ["MYSQL_PASSWORD"] = "test_password"
 os.environ["API_KEY"] = "test_api_key"
 os.environ["DB_HOST"] = "localhost"
 os.environ["ONNX_INFERENCE"] = "0"
+os.environ["DB_STARTUP_REQUIRED"] = "0"
+os.environ["DB_STARTUP_ATTEMPTS"] = "1"
+os.environ["DB_STARTUP_DELAY"] = "0"
+os.environ["RATE_LIMIT_REDIS_REQUIRED"] = "0"
+os.environ["OUTBOX_WORKER_ENABLED"] = "0"
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6399/0")
 
 from api.inference import sanitize_job_id
@@ -32,8 +37,10 @@ def make_image() -> bytes:
 
 def key_record():
     return {
+        "id": 7,
         "api_key": "pk_hash",
         "owner": "tester",
+        "key_type": "user",
         "is_active": 1,
         "rate_limit": 10,
         "window_seconds": 60,
@@ -43,8 +50,12 @@ def key_record():
 
 @pytest.fixture
 def api_client():
-    with TestClient(main.app) as client:
-        yield client
+    with mock.patch.object(main, "init_db"), \
+         mock.patch.object(main, "warmup", return_value="torch"), \
+         mock.patch.object(main, "get_or_create_portal_key"), \
+         mock.patch.object(main, "is_model_loaded", return_value=True):
+        with TestClient(main.app) as client:
+            yield client
 
 
 def test_health_check(api_client):
@@ -80,9 +91,8 @@ def test_predict_success(api_client):
          mock.patch.object(main, "check_rate_limit", return_value=0), \
          mock.patch.object(main, "run_inference",
                            return_value=([], "unknown")), \
-         mock.patch.object(main, "increment_usage"), \
-         mock.patch.object(main, "log_prediction"), \
-         mock.patch.object(main, "send_to_ci") as send_mock:
+         mock.patch.object(main, "record_prediction_event", return_value=1), \
+         mock.patch.object(main, "deliver_outbox_entry") as send_mock:
         response = api_client.post(
             "/v1/predict",
             headers={"X-API-KEY": "pk_test"},
@@ -156,6 +166,38 @@ def test_predictions_limit_clamped(api_client):
          mock.patch.object(main, "get_prediction_logs", return_value=[]) as mocked:
         api_client.get("/v1/predictions", headers={"X-API-KEY": "pk_test"}, params={"limit": 9999})
         assert mocked.call_args[0][1] == 100
+
+
+def test_usage_masks_api_key(api_client):
+    with mock.patch.object(main, "get_api_key_record", return_value=key_record()):
+        response = api_client.get("/v1/usage", headers={"X-API-KEY": "pk_test_key_12345"})
+
+    assert response.status_code == 200
+    assert response.json()["api_key"] == "pk_...2345"
+
+
+def test_model_unavailable_returns_service_error(api_client):
+    with mock.patch.object(main, "is_model_loaded", return_value=False), \
+         mock.patch.object(main, "get_api_key_record", return_value=key_record()):
+        response = api_client.post(
+            "/v1/predict",
+            headers={"X-API-KEY": "pk_test"},
+            files={"image": ("test.jpg", make_image(), "image/jpeg")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "MODEL_UNAVAILABLE"
+
+
+def test_create_key_rejects_invalid_quota(api_client):
+    response = api_client.post(
+        "/v1/keys",
+        headers={"X-API-KEY": "test_api_key"},
+        json={"owner": "tester", "rate_limit": 0, "window_seconds": 60},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_RATE_LIMIT"
 
 
 def test_sanitize_job_id_removes_path_traversal():
@@ -233,3 +275,23 @@ def test_check_rate_limit_enforces_429():
     auth.record_prediction(key, 60)
     result = auth.check_rate_limit(key, 2, 60)
     assert result.status_code == 429
+
+
+def test_memory_rate_limiter_reserves_atomically():
+    limiter = SlidingWindowRateLimiter(use_memory_only=True)
+    first = limiter.reserve("atomic", 60, 2)
+    second = limiter.reserve("atomic", 60, 2)
+    third = limiter.reserve("atomic", 60, 2)
+
+    assert first.allowed is True
+    assert second.allowed is True
+    assert third.allowed is False
+    assert third.count == 2
+
+
+def test_rate_limiter_hashes_window_keys():
+    limiter = SlidingWindowRateLimiter(use_memory_only=True)
+    window_key = limiter._window_key("secret-api-key")
+
+    assert "secret-api-key" not in window_key
+    assert window_key.startswith("rate:")

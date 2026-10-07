@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -24,20 +25,37 @@ ONNX_INFERENCE = os.getenv("ONNX_INFERENCE", "0") == "1"
 
 logger = logging.getLogger("plasticid-api")
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
-MODEL_PATH = os.getenv("MODEL_PATH", str(MODELS_DIR / "best_v8m.pt"))
-DETECTOR_PATH = os.getenv("DETECTOR_PATH", str(MODELS_DIR / "yolov8n.pt"))
+APP_DIR = Path(__file__).resolve().parent.parent
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+MODELS_DIR = APP_DIR / "models"
+
+
+def _default_detector_path() -> str:
+    candidates = (
+        MODELS_DIR / "yolov8n.pt",
+        APP_DIR / "yolov8n.pt",
+        PROJECT_DIR / "yolov8n.pt",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return str(candidates[-1])
+
+
+MODEL_PATH = os.getenv("MODEL_PATH") or str(MODELS_DIR / "best_v8m.pt")
+DETECTOR_PATH = os.getenv("DETECTOR_PATH") or _default_detector_path()
 MODEL_NAME = Path(MODEL_PATH).name
 DETECTOR_NAME = Path(DETECTOR_PATH).name
 TORCH_MODEL_PATH = Path(MODEL_PATH)
 TORCH_DETECTOR_PATH = Path(DETECTOR_PATH)
+
+_PREDICT_LOCK = threading.Lock()
 
 TARGET_OBJECTS = [
     "bottle",
     "cup",
     "bowl",
     "wine glass",
-    "sports ball",
     "vase"
 ]
 
@@ -80,9 +98,22 @@ def _load_torch_models() -> None:
 
 
 def _predict(yolo: YOLO, source, conf: float):
-    if INFERENCE_MODE == "onnx":
-        return yolo.predict(source=source, conf=conf, verbose=False)
-    return yolo.predict(source=source, conf=conf, device="cpu", verbose=False)
+    with _PREDICT_LOCK:
+        if INFERENCE_MODE == "onnx":
+            return yolo.predict(source=source, conf=conf, verbose=False)
+        return yolo.predict(source=source, conf=conf, device="cpu", verbose=False)
+
+
+def _require_weights() -> None:
+    missing = [
+        str(path)
+        for path in (TORCH_MODEL_PATH, TORCH_DETECTOR_PATH)
+        if not path.is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "Missing model weights: " + ", ".join(missing)
+        )
 
 
 def warmup() -> str:
@@ -90,6 +121,8 @@ def warmup() -> str:
     if classifier_model is not None and detector_model is not None:
         MODEL_LOADED = True
         return INFERENCE_MODE
+
+    _require_weights()
 
     if ONNX_INFERENCE and ONNX_AVAILABLE:
         try:
@@ -112,10 +145,11 @@ def warmup() -> str:
 
 
 def validate_file(file: UploadFile):
-    if file.content_type not in ALLOWED_TYPES:
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_TYPES)}"
+            detail=f"Invalid file type. Allowed: {', '.join(sorted(ALLOWED_TYPES))}"
         )
 
 
