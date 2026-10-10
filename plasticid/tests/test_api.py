@@ -25,7 +25,8 @@ from api.inference import sanitize_job_id
 from api import main
 from api.preprocess import MAX_IMAGE_EDGE, prepare_image, rescale_bbox
 from api.inference_cache import TTLCache
-from api.rate_limiter import SlidingWindowRateLimiter
+from api.rate_limiter import Reservation, SlidingWindowRateLimiter
+from api.inference import InferenceBusyError
 import api.auth as auth
 
 
@@ -88,7 +89,7 @@ def test_predict_invalid_api_key(api_client):
 
 def test_predict_success(api_client):
     with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
-         mock.patch.object(main, "check_rate_limit", return_value=0), \
+         mock.patch.object(main, "reserve_rate_limit", return_value=Reservation(True, 0, "tok")), \
          mock.patch.object(main, "run_inference",
                            return_value=([], "unknown")), \
          mock.patch.object(main, "record_prediction_event", return_value=1), \
@@ -113,7 +114,7 @@ def test_rate_limit_exceeded(api_client):
         content={"error": {"code": "rate_limit_exceeded", "message": "slow down"}},
     )
     with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
-         mock.patch.object(main, "check_rate_limit", return_value=limited):
+         mock.patch.object(main, "reserve_rate_limit", return_value=limited):
         response = api_client.post(
             "/v1/predict",
             headers={"X-API-KEY": "pk_test"},
@@ -122,9 +123,38 @@ def test_rate_limit_exceeded(api_client):
     assert response.status_code == 429
 
 
+def test_inference_busy_returns_503(api_client):
+    with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
+         mock.patch.object(main, "reserve_rate_limit", return_value=Reservation(True, 1, "tok")), \
+         mock.patch.object(main, "CACHE_ENABLED", False), \
+         mock.patch.object(main, "run_inference", side_effect=InferenceBusyError("busy")), \
+         mock.patch.object(main.limiter, "release") as release_mock:
+        response = api_client.post(
+            "/v1/predict",
+            headers={"X-API-KEY": "pk_test"},
+            files={"image": ("test.jpg", make_image(), "image/jpeg")},
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "INFERENCE_BUSY"
+    assert release_mock.call_count == 1
+
+
+def test_failed_request_releases_rate_limit_slot(api_client):
+    with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
+         mock.patch.object(main, "reserve_rate_limit", return_value=Reservation(True, 1, "tok")), \
+         mock.patch.object(main.limiter, "release") as release_mock:
+        response = api_client.post(
+            "/v1/predict",
+            headers={"X-API-KEY": "pk_test"},
+            files={"image": ("test.txt", b"not an image", "text/plain")},
+        )
+    assert response.status_code == 400
+    assert release_mock.call_count == 1
+
+
 def test_validate_file_type_rejected(api_client):
     with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
-         mock.patch.object(main, "check_rate_limit", return_value=0):
+         mock.patch.object(main, "reserve_rate_limit", return_value=Reservation(True, 0, "tok")):
         response = api_client.post(
             "/v1/predict",
             headers={"X-API-KEY": "pk_test"},
@@ -135,7 +165,7 @@ def test_validate_file_type_rejected(api_client):
 
 def test_image_content_validation(api_client):
     with mock.patch.object(main, "get_api_key_record", return_value=key_record()), \
-         mock.patch.object(main, "check_rate_limit", return_value=0):
+         mock.patch.object(main, "reserve_rate_limit", return_value=Reservation(True, 0, "tok")):
         response = api_client.post(
             "/v1/predict",
             headers={"X-API-KEY": "pk_test"},
@@ -267,13 +297,12 @@ def test_rate_limiter_memory_enforces_limit():
     assert counts == [0, 1, 2]
 
 
-def test_check_rate_limit_enforces_429():
-    mem = SlidingWindowRateLimiter(use_memory_only=True)
-    key = f"rl-{id(mem)}"
-    assert isinstance(auth.check_rate_limit(key, 2, 60), int)
+def test_reserve_rate_limit_enforces_429():
+    key = f"rl-reserve-{id(object())}"
+    reservation = auth.reserve_rate_limit(key, 2, 60)
+    assert reservation.allowed is True
     auth.record_prediction(key, 60)
-    auth.record_prediction(key, 60)
-    result = auth.check_rate_limit(key, 2, 60)
+    result = auth.reserve_rate_limit(key, 2, 60)
     assert result.status_code == 429
 
 

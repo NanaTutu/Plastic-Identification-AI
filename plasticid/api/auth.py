@@ -13,7 +13,14 @@ def generate_api_key():
     return "pk_" + secrets.token_hex(24)
 
 
-def check_rate_limit(api_key: str, rate_limit: int, window_seconds: int):
+def reserve_rate_limit(api_key: str, rate_limit: int, window_seconds: int):
+    """Atomically reserve a slot in the caller's sliding window.
+
+    Returns the :class:`Reservation` on success, or a JSON error response when
+    the limiter is unavailable / the quota is exhausted. Callers that never do
+    the work they reserved for should hand the reservation back with
+    ``limiter.release`` so failed requests do not consume quota.
+    """
     try:
         reservation = limiter.reserve(api_key, window_seconds, rate_limit)
     except RateLimiterUnavailable:
@@ -29,7 +36,7 @@ def check_rate_limit(api_key: str, rate_limit: int, window_seconds: int):
             f"Rate limit exceeded. Retry in {window_seconds}s",
             {"retry_after": window_seconds},
         )
-    return reservation.count
+    return reservation
 
 
 def record_prediction(api_key: str, window_seconds: int) -> None:
@@ -49,10 +56,6 @@ def check_admin_rate_limit(client_ip: str) -> bool | None:
         return limiter.reserve(f"admin:{client_ip}", _ADMIN_WINDOW, _ADMIN_LIMIT).allowed
     except RateLimiterUnavailable:
         return None
-
-
-def rate_limit_backend() -> str:
-    return "redis" if not limiter._degraded and limiter._redis else "memory"
 
 
 def api_error(

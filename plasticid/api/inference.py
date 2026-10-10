@@ -3,6 +3,7 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import UploadFile, HTTPException
@@ -50,6 +51,14 @@ TORCH_MODEL_PATH = Path(MODEL_PATH)
 TORCH_DETECTOR_PATH = Path(DETECTOR_PATH)
 
 _PREDICT_LOCK = threading.Lock()
+# Cap how long a request will wait for the single inference slot before the
+# service sheds load. 0 (or negative) restores the old unbounded behaviour.
+INFERENCE_LOCK_TIMEOUT = float(os.getenv("INFERENCE_LOCK_TIMEOUT", "30"))
+
+
+class InferenceBusyError(RuntimeError):
+    """Raised when the inference slot is saturated and cannot be acquired."""
+
 
 TARGET_OBJECTS = [
     "bottle",
@@ -97,8 +106,22 @@ def _load_torch_models() -> None:
     INFERENCE_MODE = "torch"
 
 
+@contextmanager
+def _inference_slot():
+    if INFERENCE_LOCK_TIMEOUT > 0:
+        acquired = _PREDICT_LOCK.acquire(timeout=INFERENCE_LOCK_TIMEOUT)
+    else:
+        acquired = _PREDICT_LOCK.acquire()
+    if not acquired:
+        raise InferenceBusyError("Inference workers are saturated")
+    try:
+        yield
+    finally:
+        _PREDICT_LOCK.release()
+
+
 def _predict(yolo: YOLO, source, conf: float):
-    with _PREDICT_LOCK:
+    with _inference_slot():
         if INFERENCE_MODE == "onnx":
             return yolo.predict(source=source, conf=conf, verbose=False)
         return yolo.predict(source=source, conf=conf, device="cpu", verbose=False)

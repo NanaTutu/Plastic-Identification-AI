@@ -16,6 +16,10 @@ except ImportError:
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 _RECONNECT_INTERVAL = 30.0
 _KEY_PREFIX = "rate:"
+# Upper bound on distinct in-memory buckets. Only used when Redis is
+# unavailable; without a cap a key spray (many distinct keys) would grow the
+# dict unbounded and exhaust memory.
+_MEMORY_MAX_KEYS = max(1, int(os.getenv("RATE_LIMIT_MEMORY_MAX_KEYS", "10000")))
 _RESERVE_SCRIPT = """
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
@@ -125,17 +129,26 @@ class SlidingWindowRateLimiter:
         while bucket and bucket[0][0] <= cutoff:
             bucket.popleft()
 
+    def _memory_bucket(self, key: str, window_seconds: int) -> deque[tuple[float, str]]:
+        window_key = self._window_key(key)
+        bucket = self._buckets.get(window_key)
+        if bucket is None:
+            if len(self._buckets) >= _MEMORY_MAX_KEYS:
+                # Evict the oldest bucket so a key spray cannot grow the map
+                # without bound while the Redis limiter is degraded.
+                self._buckets.pop(next(iter(self._buckets)), None)
+            bucket = deque()
+            self._buckets[window_key] = bucket
+        self._prune_memory(bucket, window_seconds)
+        return bucket
+
     def _check_memory(self, key: str, window_seconds: int) -> int:
         with self._lock:
-            bucket = self._buckets.setdefault(self._window_key(key), deque())
-            self._prune_memory(bucket, window_seconds)
-            return len(bucket)
+            return len(self._memory_bucket(key, window_seconds))
 
     def _reserve_memory(self, key: str, window_seconds: int, limit: int) -> Reservation:
         with self._lock:
-            window_key = self._window_key(key)
-            bucket = self._buckets.setdefault(window_key, deque())
-            self._prune_memory(bucket, window_seconds)
+            bucket = self._memory_bucket(key, window_seconds)
             if len(bucket) >= limit:
                 return Reservation(False, len(bucket))
             token = uuid.uuid4().hex
@@ -219,8 +232,7 @@ class SlidingWindowRateLimiter:
             except Exception:
                 self._mark_degraded()
         with self._lock:
-            bucket = self._buckets.setdefault(self._window_key(key), deque())
-            self._prune_memory(bucket, window_seconds)
+            bucket = self._memory_bucket(key, window_seconds)
             bucket.append((time.monotonic(), uuid.uuid4().hex))
 
     def available(self) -> bool:

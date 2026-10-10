@@ -12,16 +12,18 @@ import httpx
 import pymysql
 import pymysql.err
 from fastapi import BackgroundTasks, Body, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from api.auth import (
     api_error,
     check_admin_rate_limit,
-    check_rate_limit,
     master_key_ok,
+    reserve_rate_limit,
 )
 from api.database import (
+    DatabaseBusy,
     claim_outbox_entries,
     claim_outbox_entry,
     close_db_pool,
@@ -42,6 +44,7 @@ from api.database import (
 from api.inference import (
     MAX_FILE_SIZE,
     MODEL_NAME,
+    InferenceBusyError,
     is_model_loaded,
     run_inference,
     validate_file,
@@ -72,6 +75,15 @@ CACHE_MAX_IMAGE_SIZE = max(0, int(os.getenv("CACHE_MAX_IMAGE_SIZE", str(2 * 1024
 OUTBOX_WORKER_ENABLED = os.getenv("OUTBOX_WORKER_ENABLED", "1") == "1"
 OUTBOX_POLL_INTERVAL = max(0.5, float(os.getenv("OUTBOX_POLL_INTERVAL", "5")))
 OUTBOX_BATCH_SIZE = max(1, min(int(os.getenv("OUTBOX_BATCH_SIZE", "10")), 100))
+# Cheap read endpoints (history / usage) get their own fixed quota so a valid
+# key cannot use them to flood the database.
+READ_RATE_LIMIT = max(1, int(os.getenv("READ_RATE_LIMIT", "120")))
+READ_RATE_WINDOW = max(1, int(os.getenv("READ_RATE_WINDOW", "60")))
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8080").split(",")
+    if origin.strip()
+]
 _outbox_task: asyncio.Task | None = None
 
 
@@ -189,6 +201,35 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Plastic Identification API", lifespan=lifespan)
 Instrumentator().instrument(app).expose(app)
 
+if CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOWED_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["X-API-KEY", "Content-Type"],
+    )
+
+
+@app.exception_handler(DatabaseBusy)
+async def _database_busy_handler(_request: Request, _exc: DatabaseBusy):
+    return api_error(
+        503,
+        "DATABASE_BUSY",
+        "Database is temporarily busy",
+        {"retry_after": 5},
+    )
+
+
+@app.exception_handler(InferenceBusyError)
+async def _inference_busy_handler(_request: Request, _exc: InferenceBusyError):
+    return api_error(
+        503,
+        "INFERENCE_BUSY",
+        "Inference capacity is saturated",
+        {"retry_after": 2},
+    )
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -247,6 +288,17 @@ def _require_master(request: Request, x_api_key: str | None):
             "rate_limit_exceeded",
             "Too many admin requests. Please retry later.",
         )
+    return None
+
+
+def _read_rate_limit(api_key: str):
+    """Apply a fixed quota to cheap read endpoints, independent of the
+    prediction quota, so a valid key cannot use them to flood the database."""
+    reservation = reserve_rate_limit(
+        f"read:{api_key}", READ_RATE_LIMIT, READ_RATE_WINDOW
+    )
+    if isinstance(reservation, JSONResponse):
+        return reservation
     return None
 
 
@@ -374,6 +426,10 @@ def usage(x_api_key: str | None = Header(default=None)):
     if not record:
         return api_error(401, "INVALID_API_KEY", "Invalid or inactive API key")
 
+    error = _read_rate_limit(key)
+    if error is not None:
+        return error
+
     return {
         "api_key": mask_key(key),
         "is_active": bool(record["is_active"]),
@@ -412,106 +468,124 @@ async def predict_v1(
     if not is_model_loaded():
         return api_error(503, "MODEL_UNAVAILABLE", "Inference model is not ready")
 
-    result = await asyncio.to_thread(
-        check_rate_limit,
+    reservation = await asyncio.to_thread(
+        reserve_rate_limit,
         key,
         key_record["rate_limit"],
         key_record["window_seconds"],
     )
-    if isinstance(result, JSONResponse):
-        return result
+    if isinstance(reservation, JSONResponse):
+        return reservation
 
     response.headers["X-RateLimit-Limit"] = str(key_record["rate_limit"])
     response.headers["X-RateLimit-Remaining"] = str(
-        max(0, key_record["rate_limit"] - result)
+        max(0, key_record["rate_limit"] - reservation.count)
     )
     response.headers["X-RateLimit-Reset"] = str(
         int(time.time() + key_record["window_seconds"])
     )
 
+    def _release_reservation() -> None:
+        limiter.release(key, key_record["window_seconds"], reservation.token)
+
+    # Reserve-then-release: any path that does not return a prediction hands the
+    # slot back, so invalid uploads and service errors do not consume quota.
+    delivered = False
     try:
-        validate_file(image)
-    except HTTPException as exc:
-        return api_error(exc.status_code, "INVALID_FILE_TYPE", str(exc.detail))
+        try:
+            validate_file(image)
+        except HTTPException as exc:
+            return api_error(exc.status_code, "INVALID_FILE_TYPE", str(exc.detail))
 
-    img_bytes = await _read_limited_upload(image, MAX_FILE_SIZE)
-    if len(img_bytes) > MAX_FILE_SIZE:
-        return api_error(413, "FILE_TOO_LARGE", "File size exceeds the 10MB limit")
+        img_bytes = await _read_limited_upload(image, MAX_FILE_SIZE)
+        if len(img_bytes) > MAX_FILE_SIZE:
+            return api_error(413, "FILE_TOO_LARGE", "File size exceeds the 10MB limit")
 
-    if not validate_image_content(img_bytes):
-        return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid JPEG or PNG image")
+        if not validate_image_content(img_bytes):
+            return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid JPEG or PNG image")
 
-    cache_key = _cache_key("v1", img_bytes)
-    cache_allowed = CACHE_ENABLED and len(img_bytes) <= CACHE_MAX_IMAGE_SIZE
-    cached = result_cache.get(cache_key) if cache_allowed else None
-    start = time.time()
-    try:
-        if cached is None:
-            detections, detected_object = await asyncio.to_thread(run_inference, img_bytes)
-            if cache_allowed:
-                result_cache.set(cache_key, (detections, detected_object))
-        else:
-            detections, detected_object = cached
-    except Exception as exc:
-        logger.exception("Inference failed: %s", exc)
-        return api_error(503, "INFERENCE_UNAVAILABLE", "Inference service is temporarily unavailable")
+        cache_key = _cache_key("v1", img_bytes)
+        cache_allowed = CACHE_ENABLED and len(img_bytes) <= CACHE_MAX_IMAGE_SIZE
+        cached = result_cache.get(cache_key) if cache_allowed else None
+        start = time.time()
+        try:
+            if cached is None:
+                detections, detected_object = await asyncio.to_thread(run_inference, img_bytes)
+                if cache_allowed:
+                    result_cache.set(cache_key, (detections, detected_object))
+            else:
+                detections, detected_object = cached
+        except InferenceBusyError:
+            logger.warning("Inference capacity exhausted; shedding load")
+            return api_error(
+                503,
+                "INFERENCE_BUSY",
+                "Inference capacity is saturated. Please retry.",
+                {"retry_after": 2},
+            )
+        except Exception as exc:
+            logger.exception("Inference failed: %s", exc)
+            return api_error(503, "INFERENCE_UNAVAILABLE", "Inference service is temporarily unavailable")
 
-    inference_time = int((time.time() - start) * 1000)
+        inference_time = int((time.time() - start) * 1000)
 
-    try:
-        image_width, image_height = _image_dimensions(img_bytes)
-        image_sha256 = hashlib.sha256(img_bytes).hexdigest()
-        source = "portal" if key_record.get("key_type") == "service" or key_record.get("owner") == "portal" else "api"
-        ci_detections = [
-            {
-                "class": detection["class_name"],
-                "confidence": detection["confidence"],
-                "bbox": detection["bbox"],
+        try:
+            image_width, image_height = _image_dimensions(img_bytes)
+            image_sha256 = hashlib.sha256(img_bytes).hexdigest()
+            source = "portal" if key_record.get("key_type") == "service" or key_record.get("owner") == "portal" else "api"
+            ci_detections = [
+                {
+                    "class": detection["class_name"],
+                    "confidence": detection["confidence"],
+                    "bbox": detection["bbox"],
+                }
+                for detection in detections
+            ]
+            ci_payload = {
+                "job_id": job_id,
+                "filename": _safe_filename(image.filename, job_id),
+                "content_type": (image.content_type or "application/octet-stream").split(";", 1)[0].lower(),
+                "model": "plasticid_v1",
+                "detections": ci_detections,
+                "count": len(detections),
+                "inference_ms": inference_time,
+                "source": source,
+                "api_key_id": key_record.get("id"),
+                "detected_object": detected_object,
+                "image_width": image_width,
+                "image_height": image_height,
+                "image_sha256": image_sha256,
             }
-            for detection in detections
-        ]
-        ci_payload = {
+            outbox_id = await asyncio.to_thread(
+                record_prediction_event,
+                key,
+                key_record.get("id"),
+                job_id,
+                "plasticid_v1",
+                len(detections),
+                inference_time,
+                ci_payload,
+                detected_object,
+                image_sha256,
+                source,
+            )
+        except Exception as exc:
+            logger.exception("Failed to persist prediction metadata: %s", exc)
+            return api_error(503, "USAGE_RECORD_FAILED", "Prediction could not be recorded")
+
+        background_tasks.add_task(deliver_outbox_entry, outbox_id)
+        delivered = True
+        return {
             "job_id": job_id,
-            "filename": _safe_filename(image.filename, job_id),
-            "content_type": (image.content_type or "application/octet-stream").split(";", 1)[0].lower(),
             "model": "plasticid_v1",
-            "detections": ci_detections,
             "count": len(detections),
+            "detections": detections,
             "inference_ms": inference_time,
-            "source": source,
-            "api_key_id": key_record.get("id"),
             "detected_object": detected_object,
-            "image_width": image_width,
-            "image_height": image_height,
-            "image_sha256": image_sha256,
         }
-        outbox_id = await asyncio.to_thread(
-            record_prediction_event,
-            key,
-            key_record.get("id"),
-            job_id,
-            "plasticid_v1",
-            len(detections),
-            inference_time,
-            ci_payload,
-            detected_object,
-            image_sha256,
-            source,
-        )
-    except Exception as exc:
-        logger.exception("Failed to persist prediction metadata: %s", exc)
-        return api_error(503, "USAGE_RECORD_FAILED", "Prediction could not be recorded")
-
-    background_tasks.add_task(deliver_outbox_entry, outbox_id)
-
-    return {
-        "job_id": job_id,
-        "model": "plasticid_v1",
-        "count": len(detections),
-        "detections": detections,
-        "inference_ms": inference_time,
-        "detected_object": detected_object,
-    }
+    finally:
+        if not delivered:
+            await asyncio.to_thread(_release_reservation)
 
 
 @app.get("/v1/predictions")
@@ -526,6 +600,10 @@ def get_predictions(
     key_record = get_api_key_record(key)
     if not key_record:
         return api_error(401, "INVALID_API_KEY", "Invalid or inactive API key")
+
+    error = _read_rate_limit(key)
+    if error is not None:
+        return error
 
     try:
         limit = max(1, min(int(limit), 100))
@@ -552,20 +630,6 @@ async def _post_to_ci(payload: dict) -> None:
 
 class PermanentDeliveryError(RuntimeError):
     pass
-
-
-async def send_to_ci(payload: dict):
-    for attempt in range(3):
-        try:
-            await _post_to_ci(payload)
-            return True
-        except PermanentDeliveryError:
-            raise
-        except Exception as exc:
-            logger.error("Failed to send prediction to CI backend (attempt %s/3): %s", attempt + 1, exc)
-            if attempt < 2:
-                await asyncio.sleep(0.5 * (attempt + 1))
-    return False
 
 
 async def _deliver_claimed_outbox(entry: dict) -> None:

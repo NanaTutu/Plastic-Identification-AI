@@ -188,6 +188,9 @@ curl http://localhost:8000/
 | `DB_MAX_CONNECTIONS` / `DB_CONNECT_TIMEOUT` | MySQL pool tuning | `10` / `5` |
 | `OUTBOX_WORKER_ENABLED` / `OUTBOX_POLL_INTERVAL` / `OUTBOX_BATCH_SIZE` | Background delivery worker | `1` / `5` / `10` |
 | `OUTBOX_MAX_ATTEMPTS` / `OUTBOX_CLAIM_TIMEOUT_SECONDS` | Outbox retry policy | `12` / `300` |
+| `INFERENCE_LOCK_TIMEOUT` | Seconds to wait for an inference slot before shedding load (`503 INFERENCE_BUSY`) | `30` |
+| `READ_RATE_LIMIT` / `READ_RATE_WINDOW` | Quota for read endpoints (`/v1/usage`, `/v1/predictions`) | `120` / `60` |
+| `RATE_LIMIT_MEMORY_MAX_KEYS` | Max keys kept in the in-process limiter fallback | `10000` |
 | `APP_BASE_URL` | Public portal URL | `http://localhost:8080/` |
 | `APP_ALLOWED_HOSTNAMES` | Extra allowed hostnames | empty |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated portal origins | `http://localhost:8080` |

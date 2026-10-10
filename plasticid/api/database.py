@@ -3,12 +3,11 @@ import json
 import os
 import secrets
 import uuid
-from datetime import datetime, timedelta
 from typing import Any
 
 import pymysql
 import pymysql.cursors
-from dbutils.pooled_db import PooledDB
+from dbutils.pooled_db import PooledDB, TooManyConnections
 
 DB_HOST = os.getenv("DB_HOST", "plasticid-db")
 DB_USER = os.getenv("MYSQL_USER", "plasticid_api")
@@ -28,6 +27,14 @@ SCHEMA_CONTRACT_VERSION = "2026-10-06-000001"
 if not DB_PASSWORD:
     raise RuntimeError("MYSQL_PASSWORD environment variable is required")
 
+
+class DatabaseBusy(RuntimeError):
+    """Raised when the connection pool has no free connection to hand out."""
+
+
+# blocking=False means the pool raises instead of waiting forever when it is
+# exhausted; callers surface this as a bounded 503 rather than hanging a worker
+# thread indefinitely under load.
 db_pool = PooledDB(
     creator=pymysql,
     maxconnections=DB_MAX_CONNECTIONS,
@@ -39,7 +46,7 @@ db_pool = PooledDB(
     connect_timeout=DB_CONNECT_TIMEOUT,
     cursorclass=pymysql.cursors.DictCursor,
     autocommit=True,
-    blocking=True,
+    blocking=False,
 )
 
 
@@ -54,7 +61,10 @@ def mask_key(api_key: str) -> str:
 
 
 def get_db():
-    return db_pool.connection()
+    try:
+        return db_pool.connection()
+    except TooManyConnections as exc:
+        raise DatabaseBusy("Database connection pool is exhausted") from exc
 
 
 # Expected schema contract. Tables are created by
@@ -327,59 +337,6 @@ def get_api_key_record(api_key: str):
         db.close()
 
 
-def increment_usage(api_key: str):
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE api_keys
-                SET total_requests = total_requests + 1, last_used_at = NOW(6)
-                WHERE api_key=%s
-                """,
-                (hash_key(api_key),),
-            )
-    finally:
-        db.close()
-
-
-def log_prediction(
-    api_key: str,
-    job_id: str,
-    model: str,
-    detection_count: int,
-    inference_ms: int,
-    detected_object: str | None = None,
-    image_sha256: str | None = None,
-    source: str = "api",
-    api_key_id: int | None = None,
-):
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO prediction_logs
-                (job_id, api_key, api_key_id, model, detections, inference_ms,
-                 source, detected_object, image_sha256, created_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(6))
-                """,
-                (
-                    job_id,
-                    hash_key(api_key),
-                    api_key_id,
-                    model,
-                    int(detection_count),
-                    int(inference_ms),
-                    source,
-                    detected_object,
-                    image_sha256,
-                ),
-            )
-    finally:
-        db.close()
-
-
 def record_prediction_event(
     api_key: str,
     api_key_id: int | None,
@@ -461,11 +418,6 @@ def _insert_api_key(owner: str, rate_limit: int, window_seconds: int, key_type: 
             return api_key, int(cur.lastrowid)
     finally:
         db.close()
-
-
-def create_api_key_record(owner: str, rate_limit: int, window_seconds: int) -> str:
-    api_key, _ = _insert_api_key(owner, rate_limit, window_seconds, "user")
-    return api_key
 
 
 def create_api_key_record_with_id(
@@ -710,30 +662,29 @@ def mark_outbox_failed(
     attempts: int = 0,
 ) -> None:
     dead_letter = permanent or attempts >= OUTBOX_MAX_ATTEMPTS
-    next_attempt = datetime.utcnow() + timedelta(seconds=min(300, 2 ** min(attempts, 8)))
+    # Schedule relative to the database clock (NOW(6)) rather than a Python
+    # UTC timestamp, so the backoff stays consistent with the claim query's
+    # `next_attempt_at <= NOW(6)` comparison regardless of server timezone.
+    backoff_seconds = min(300, 2 ** min(attempts, 8))
     db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute(
                 """
                 UPDATE prediction_outbox
-                SET status=%s, next_attempt_at=%s, locked_at=NULL, claim_token=NULL,
+                SET status=%s,
+                    next_attempt_at=DATE_ADD(NOW(6), INTERVAL %s SECOND),
+                    locked_at=NULL, claim_token=NULL,
                     last_error=%s, updated_at=NOW(6)
                 WHERE id=%s AND claim_token=%s
                 """,
-                ("dead_letter" if dead_letter else "failed", next_attempt, error[:255], outbox_id, claim_token),
+                (
+                    "dead_letter" if dead_letter else "failed",
+                    backoff_seconds,
+                    error[:255],
+                    outbox_id,
+                    claim_token,
+                ),
             )
-    finally:
-        db.close()
-
-
-def outbox_counts() -> dict[str, int]:
-    db = get_db()
-    try:
-        with db.cursor() as cur:
-            cur.execute(
-                "SELECT status, COUNT(*) AS total FROM prediction_outbox GROUP BY status"
-            )
-            return {row["status"]: int(row["total"]) for row in cur.fetchall()}
     finally:
         db.close()
