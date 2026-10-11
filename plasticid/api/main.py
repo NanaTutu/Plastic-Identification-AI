@@ -42,13 +42,13 @@ from api.database import (
     schema_diagnostics,
 )
 from api.inference import (
+    INFERENCE_LOCK_TIMEOUT,
     MAX_FILE_SIZE,
     MODEL_NAME,
     InferenceBusyError,
     is_model_loaded,
     run_inference,
     validate_file,
-    validate_image_content,
     warmup,
 )
 from api.inference_cache import CACHE_ENABLED, result_cache
@@ -85,6 +85,23 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 _outbox_task: asyncio.Task | None = None
+_inference_semaphore: asyncio.Semaphore | None = None
+_inference_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _inference_gate() -> asyncio.Semaphore:
+    """Serialize inference at the event-loop level.
+
+    Waiting requests yield on the semaphore instead of occupying executor
+    threads (which also serve database calls), so a burst of predictions no
+    longer starves unrelated ``asyncio.to_thread`` work.
+    """
+    global _inference_semaphore, _inference_semaphore_loop
+    loop = asyncio.get_running_loop()
+    if _inference_semaphore is None or _inference_semaphore_loop is not loop:
+        _inference_semaphore = asyncio.Semaphore(1)
+        _inference_semaphore_loop = loop
+    return _inference_semaphore
 
 
 async def _read_limited_upload(image: UploadFile, max_bytes: int) -> bytes:
@@ -247,27 +264,12 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-def _cache_key(mode: str, data: bytes) -> str:
-    return f"{mode}:{hashlib.sha256(data).hexdigest()}"
-
-
 def _safe_filename(filename: str | None, fallback: str) -> str:
     if not filename:
         return fallback
     value = Path(filename.replace("\\", "/")).name
     value = "".join(char for char in value if ord(char) >= 32 and ord(char) != 127)
     return value[:255] or fallback
-
-
-def _image_dimensions(data: bytes) -> tuple[int | None, int | None]:
-    try:
-        image = open_image(data)
-        try:
-            return image.size
-        finally:
-            image.close()
-    except Exception:
-        return None, None
 
 
 def _require_master(request: Request, x_api_key: str | None):
@@ -501,37 +503,57 @@ async def predict_v1(
         if len(img_bytes) > MAX_FILE_SIZE:
             return api_error(413, "FILE_TOO_LARGE", "File size exceeds the 10MB limit")
 
-        if not validate_image_content(img_bytes):
+        # Decode once and hash once, then reuse both for caching, the persisted
+        # record and inference instead of decoding the image three times.
+        try:
+            decoded = await asyncio.to_thread(open_image, img_bytes)
+        except ValueError:
             return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid JPEG or PNG image")
 
-        cache_key = _cache_key("v1", img_bytes)
+        image_width, image_height = decoded.size
+        image_sha256 = hashlib.sha256(img_bytes).hexdigest()
+        cache_key = f"v1:{image_sha256}"
         cache_allowed = CACHE_ENABLED and len(img_bytes) <= CACHE_MAX_IMAGE_SIZE
         cached = result_cache.get(cache_key) if cache_allowed else None
         start = time.time()
-        try:
-            if cached is None:
-                detections, detected_object = await asyncio.to_thread(run_inference, img_bytes)
+        if cached is None:
+            gate = _inference_gate()
+            timeout = INFERENCE_LOCK_TIMEOUT if INFERENCE_LOCK_TIMEOUT > 0 else None
+            try:
+                await asyncio.wait_for(gate.acquire(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning("Inference capacity exhausted; shedding load")
+                return api_error(
+                    503,
+                    "INFERENCE_BUSY",
+                    "Inference capacity is saturated. Please retry.",
+                    {"retry_after": 2},
+                )
+            try:
+                detections, detected_object = await asyncio.to_thread(
+                    run_inference, None, decoded
+                )
                 if cache_allowed:
                     result_cache.set(cache_key, (detections, detected_object))
-            else:
-                detections, detected_object = cached
-        except InferenceBusyError:
-            logger.warning("Inference capacity exhausted; shedding load")
-            return api_error(
-                503,
-                "INFERENCE_BUSY",
-                "Inference capacity is saturated. Please retry.",
-                {"retry_after": 2},
-            )
-        except Exception as exc:
-            logger.exception("Inference failed: %s", exc)
-            return api_error(503, "INFERENCE_UNAVAILABLE", "Inference service is temporarily unavailable")
+            except InferenceBusyError:
+                logger.warning("Inference capacity exhausted; shedding load")
+                return api_error(
+                    503,
+                    "INFERENCE_BUSY",
+                    "Inference capacity is saturated. Please retry.",
+                    {"retry_after": 2},
+                )
+            except Exception as exc:
+                logger.exception("Inference failed: %s", exc)
+                return api_error(503, "INFERENCE_UNAVAILABLE", "Inference service is temporarily unavailable")
+            finally:
+                gate.release()
+        else:
+            detections, detected_object = cached
 
         inference_time = int((time.time() - start) * 1000)
 
         try:
-            image_width, image_height = _image_dimensions(img_bytes)
-            image_sha256 = hashlib.sha256(img_bytes).hexdigest()
             source = "portal" if key_record.get("key_type") == "service" or key_record.get("owner") == "portal" else "api"
             ci_detections = [
                 {

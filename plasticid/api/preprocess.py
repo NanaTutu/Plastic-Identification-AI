@@ -41,8 +41,11 @@ def _auto_white_balance(img: Image.Image) -> Image.Image:
         return img
 
 
-def prepare_image(img_bytes: bytes) -> tuple[Image.Image, float, float]:
-    img = open_image(img_bytes)
+def prepare_image(
+    img_bytes: bytes | None = None,
+    image: Image.Image | None = None,
+) -> tuple[Image.Image, float, float]:
+    img = image if image is not None else open_image(img_bytes)
     orig_w, orig_h = img.size
 
     scale_x, scale_y = 1.0, 1.0

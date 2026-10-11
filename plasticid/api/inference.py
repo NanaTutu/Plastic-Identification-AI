@@ -234,8 +234,8 @@ def _classify(cropped: Image.Image, cap_fx: float, cap_fy: float, scale_x: float
     return detections
 
 
-def run_inference(img_bytes: bytes):
-    img, scale_x, scale_y = prepare_image(img_bytes)
+def run_inference(img_bytes: bytes | None = None, image: Image.Image | None = None):
+    img, scale_x, scale_y = prepare_image(img_bytes, image)
 
     best_conf = 0
     best_box = None

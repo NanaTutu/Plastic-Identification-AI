@@ -2,12 +2,16 @@ import hashlib
 import json
 import os
 import secrets
+import threading
+import time
 import uuid
 from typing import Any
 
 import pymysql
 import pymysql.cursors
 from dbutils.pooled_db import PooledDB, TooManyConnections
+
+from api.inference_cache import TTLCache
 
 DB_HOST = os.getenv("DB_HOST", "plasticid-db")
 DB_USER = os.getenv("MYSQL_USER", "plasticid_api")
@@ -18,6 +22,19 @@ DB_MAX_CONNECTIONS = max(1, int(os.getenv("DB_MAX_CONNECTIONS", "10")))
 DB_CONNECT_TIMEOUT = max(1, int(os.getenv("DB_CONNECT_TIMEOUT", "5")))
 OUTBOX_MAX_ATTEMPTS = max(1, int(os.getenv("OUTBOX_MAX_ATTEMPTS", "12")))
 OUTBOX_CLAIM_TIMEOUT_SECONDS = max(60, int(os.getenv("OUTBOX_CLAIM_TIMEOUT_SECONDS", "300")))
+
+# API key records change rarely, so a short TTL cache removes a database
+# round-trip from every authenticated request. Writes invalidate the entry in
+# this process; other workers converge within the TTL.
+API_KEY_CACHE_TTL = max(0, int(os.getenv("API_KEY_CACHE_TTL", "15")))
+_api_key_cache = TTLCache(max_items=2048, ttl_seconds=API_KEY_CACHE_TTL)
+
+# The schema contract is stable at runtime, so the multi-query diagnostics walk
+# (information_schema for every table) is memoized instead of running on every
+# readiness probe.
+SCHEMA_CACHE_TTL = max(0.0, float(os.getenv("SCHEMA_CACHE_TTL", "30")))
+_schema_cache: dict[str, Any] = {"value": None, "expires_at": 0.0}
+_schema_cache_lock = threading.Lock()
 
 # The schema is owned by the CodeIgniter migrations (`php spark migrate`,
 # run by the ci service at startup). FastAPI never creates or alters tables;
@@ -220,7 +237,19 @@ def _foreign_keys(cur) -> set[tuple[str, str, str, str]]:
     }
 
 
-def schema_diagnostics() -> dict[str, Any]:
+def schema_diagnostics(force: bool = False) -> dict[str, Any]:
+    now = time.monotonic()
+    cached = _schema_cache["value"]
+    if not force and cached is not None and now < _schema_cache["expires_at"]:
+        return cached
+    value = _compute_schema_diagnostics()
+    with _schema_cache_lock:
+        _schema_cache["value"] = value
+        _schema_cache["expires_at"] = time.monotonic() + SCHEMA_CACHE_TTL
+    return value
+
+
+def _compute_schema_diagnostics() -> dict[str, Any]:
     missing_tables: list[str] = []
     missing_columns: dict[str, list[str]] = {}
     missing_indexes: list[str] = []
@@ -313,7 +342,7 @@ def db_is_ready() -> bool:
 
 def init_db():
     """Verify (never mutate) the schema owned by the CodeIgniter migrations."""
-    diagnostics = schema_diagnostics()
+    diagnostics = schema_diagnostics(force=True)
     if not diagnostics["ok"]:
         raise RuntimeError(
             "Database schema verification failed: " + json.dumps(diagnostics, sort_keys=True)
@@ -325,16 +354,23 @@ def close_db_pool() -> None:
 
 
 def get_api_key_record(api_key: str):
+    key_hash = hash_key(api_key)
+    cached = _api_key_cache.get(key_hash)
+    if cached is not None:
+        return cached
     db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute(
                 "SELECT * FROM api_keys WHERE api_key=%s AND is_active=1",
-                (hash_key(api_key),),
+                (key_hash,),
             )
-            return cur.fetchone()
+            record = cur.fetchone()
     finally:
         db.close()
+    if record is not None:
+        _api_key_cache.set(key_hash, record)
+    return record
 
 
 def record_prediction_event(
@@ -427,6 +463,7 @@ def create_api_key_record_with_id(
 
 
 def deactivate_api_key(api_key: str) -> bool:
+    key_hash = hash_key(api_key)
     db = get_db()
     try:
         with db.cursor() as cur:
@@ -436,11 +473,14 @@ def deactivate_api_key(api_key: str) -> bool:
                 SET is_active=0, deactivated_at=NOW(6)
                 WHERE api_key=%s AND is_active=1
                 """,
-                (hash_key(api_key),),
+                (key_hash,),
             )
-            return cur.rowcount > 0
+            deactivated = cur.rowcount > 0
     finally:
         db.close()
+    if deactivated:
+        _api_key_cache.delete(key_hash)
+    return deactivated
 
 
 def list_api_keys():
@@ -555,6 +595,7 @@ def get_or_create_portal_key(portal_key: str):
                     """,
                     (rate_limit, window_seconds, key_hash),
                 )
+                _api_key_cache.delete(key_hash)
                 return
             cur.execute(
                 "UPDATE api_keys SET is_active=0, deactivated_at=NOW(6) WHERE key_type='service'"

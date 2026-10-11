@@ -191,6 +191,8 @@ curl http://localhost:8000/
 | `INFERENCE_LOCK_TIMEOUT` | Seconds to wait for an inference slot before shedding load (`503 INFERENCE_BUSY`) | `30` |
 | `READ_RATE_LIMIT` / `READ_RATE_WINDOW` | Quota for read endpoints (`/v1/usage`, `/v1/predictions`) | `120` / `60` |
 | `RATE_LIMIT_MEMORY_MAX_KEYS` | Max keys kept in the in-process limiter fallback | `10000` |
+| `API_KEY_CACHE_TTL` | Seconds to cache API key lookups (0 disables) | `15` |
+| `SCHEMA_CACHE_TTL` | Seconds to cache schema diagnostics for health probes (0 disables) | `30` |
 | `APP_BASE_URL` | Public portal URL | `http://localhost:8080/` |
 | `APP_ALLOWED_HOSTNAMES` | Extra allowed hostnames | empty |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated portal origins | `http://localhost:8080` |
