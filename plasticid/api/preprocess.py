@@ -17,8 +17,11 @@ def open_image(img_bytes: bytes) -> Image.Image:
                 raise ValueError(f"Unsupported image format: {source.format or 'unknown'}")
             if source.width * source.height > MAX_IMAGE_PIXELS:
                 raise ValueError("Image dimensions exceed the configured limit")
+            has_exif = bool(source.getexif())
             img = source.convert("RGB")
-        return ImageOps.exif_transpose(img)
+        # Transpose only when the file actually carries EXIF data; the common
+        # no-EXIF case otherwise pays for a full-image copy.
+        return ImageOps.exif_transpose(img) if has_exif else img
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as e:
         raise ValueError(f"Invalid image: {e}") from e
 

@@ -16,13 +16,20 @@ ALLOWED_TYPES = {"image/jpeg", "image/png", "image/jpg"}
 MAX_FILE_SIZE = 10 * 1024 * 1024
 IMGSZ = 640
 
-try:
-    import onnxruntime  # noqa: F401
-    ONNX_AVAILABLE = True
-except ImportError:
-    ONNX_AVAILABLE = False
-
 ONNX_INFERENCE = os.getenv("ONNX_INFERENCE", "0") == "1"
+
+
+def _onnx_available() -> bool:
+    """Probe onnxruntime lazily so the default (PyTorch) path never pays for
+    importing it at module load."""
+    if not ONNX_INFERENCE:
+        return False
+    try:
+        import onnxruntime  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
 
 logger = logging.getLogger("plasticid-api")
 
@@ -147,7 +154,7 @@ def warmup() -> str:
 
     _require_weights()
 
-    if ONNX_INFERENCE and ONNX_AVAILABLE:
+    if _onnx_available():
         try:
             _load_onnx_models()
         except Exception as e:

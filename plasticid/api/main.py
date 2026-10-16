@@ -503,20 +503,26 @@ async def predict_v1(
         if len(img_bytes) > MAX_FILE_SIZE:
             return api_error(413, "FILE_TOO_LARGE", "File size exceeds the 10MB limit")
 
-        # Decode once and hash once, then reuse both for caching, the persisted
-        # record and inference instead of decoding the image three times.
-        try:
-            decoded = await asyncio.to_thread(open_image, img_bytes)
-        except ValueError:
-            return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid JPEG or PNG image")
-
-        image_width, image_height = decoded.size
+        # Hash once and consult the result cache before paying for a decode, so a
+        # cache hit skips image decoding entirely. The cached entry also carries
+        # the image dimensions, keeping the outbox payload complete on a hit.
         image_sha256 = hashlib.sha256(img_bytes).hexdigest()
         cache_key = f"v1:{image_sha256}"
         cache_allowed = CACHE_ENABLED and len(img_bytes) <= CACHE_MAX_IMAGE_SIZE
         cached = result_cache.get(cache_key) if cache_allowed else None
-        start = time.time()
-        if cached is None:
+
+        if cached is not None:
+            detections, detected_object, image_width, image_height = cached
+            inference_time = 0
+        else:
+            try:
+                decoded = await asyncio.to_thread(open_image, img_bytes)
+            except ValueError:
+                return api_error(400, "INVALID_IMAGE", "Uploaded file is not a valid JPEG or PNG image")
+
+            image_width, image_height = decoded.size
+
+            start = time.time()
             gate = _inference_gate()
             timeout = INFERENCE_LOCK_TIMEOUT if INFERENCE_LOCK_TIMEOUT > 0 else None
             try:
@@ -534,7 +540,10 @@ async def predict_v1(
                     run_inference, None, decoded
                 )
                 if cache_allowed:
-                    result_cache.set(cache_key, (detections, detected_object))
+                    result_cache.set(
+                        cache_key,
+                        (detections, detected_object, image_width, image_height),
+                    )
             except InferenceBusyError:
                 logger.warning("Inference capacity exhausted; shedding load")
                 return api_error(
@@ -548,10 +557,8 @@ async def predict_v1(
                 return api_error(503, "INFERENCE_UNAVAILABLE", "Inference service is temporarily unavailable")
             finally:
                 gate.release()
-        else:
-            detections, detected_object = cached
 
-        inference_time = int((time.time() - start) * 1000)
+            inference_time = int((time.time() - start) * 1000)
 
         try:
             source = "portal" if key_record.get("key_type") == "service" or key_record.get("owner") == "portal" else "api"
